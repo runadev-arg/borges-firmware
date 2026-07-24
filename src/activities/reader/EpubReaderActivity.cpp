@@ -33,6 +33,8 @@
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
+#include "TotoDurableQueue.h"
+#include "TotoReadingEvents.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
@@ -204,6 +206,24 @@ void EpubReaderActivity::onEnter() {
   APP_STATE.openEpubPath = epub->getPath();
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+  TOTO_READING_EVENTS.beginBook(epub->getPath(), epub->getTitle(), epub->getAuthor());
+  if (const auto remote = TOTO_QUEUE.nextApplicableProgress(TOTO_READING_EVENTS.getBookHash())) {
+    const SavedProgressPosition saved{
+        .xpath = remote->xpointer,
+        .percentage = static_cast<float>(remote->percentage / 100.0),
+    };
+    const CrossPointPosition mapped =
+        ProgressMapper::toCrossPoint(epub, saved, renderer, currentSpineIndex, cachedChapterTotalPageCount);
+    currentSpineIndex = mapped.spineIndex;
+    nextPageNumber = mapped.pageNumber;
+    cachedSpineIndex = mapped.spineIndex;
+    cachedChapterTotalPageCount = mapped.totalPages;
+    if (saveProgress(mapped.spineIndex, mapped.pageNumber, mapped.totalPages)) {
+      TOTO_QUEUE.resolveProgressThrough(remote->bookHash, remote->serverSequence);
+      LOG_INF("TOTO", "Applied durable remote progress for %s at %.1f%%", TOTO_READING_EVENTS.getBookHash().c_str(),
+              remote->percentage);
+    }
+  }
 
   loadCachedBookmarks();
 
@@ -213,6 +233,8 @@ void EpubReaderActivity::onEnter() {
 
 void EpubReaderActivity::onExit() {
   Activity::onExit();
+
+  TOTO_READING_EVENTS.endBook();
 
   // The extractor holds a raw pointer to this activity's epub; drop it before
   // the activity (and the shared_ptr) goes away.
@@ -1410,6 +1432,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       lastSavedSpineIndex = currentSpineIndex;
       lastSavedPage = section->currentPage;
       lastSavedPageCount = section->estimatedTotalPages();
+      const SavedProgressPosition totoPosition = ProgressMapper::toSavedProgress(epub, getCurrentPosition());
+      TOTO_READING_EVENTS.recordPosition(totoPosition.percentage, totoPosition.xpath);
     }
   }
 

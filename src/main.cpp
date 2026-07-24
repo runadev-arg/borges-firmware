@@ -26,6 +26,9 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "TotoCredentialStore.h"
+#include "TotoDurableQueue.h"
+#include "TotoSyncScheduler.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
@@ -312,6 +315,9 @@ void setup() {
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
+  TOTO_CREDENTIALS.loadFromFile();
+  TOTO_QUEUE.begin();
+  if (TOTO_QUEUE.depth() > 0) TOTO_SYNC_SCHEDULER.notifyLifecycleCommit();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
@@ -545,6 +551,7 @@ void loop() {
 
   const unsigned long activityStartTime = millis();
   activityManager.loop();
+  TOTO_SYNC_SCHEDULER.tick(activityManager.isReaderActivity());
   const unsigned long activityDuration = millis() - activityStartTime;
 
   const unsigned long loopDuration = millis() - loopStartTime;
