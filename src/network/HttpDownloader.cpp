@@ -4,6 +4,8 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <base64.h>
+#include <esp_crt_bundle.h>
+#include <esp_http_client.h>
 
 #include <functional>
 #include <string>
@@ -12,19 +14,14 @@
 #include <SecureHttpClient.h>
 
 extern "C" void wolfSSL_Arduino_Serial_Print(const char* const msg) { LOG_DBG("WOLFSSL", "%s", msg); }
-#else
-#include <esp_crt_bundle.h>
-#include <esp_http_client.h>
 #endif
 
 namespace {
-#if !defined(FREEINK_NET_WOLFSSL)
 // RX holds the response headers. Smaller buffers leave enough contiguous heap
 // for mbedTLS on redirect-heavy OPDS feeds while still preserving the headers
 // we read directly (Location, Content-Length).
 constexpr int HTTP_RX_BUF = 2048;
 constexpr int HTTP_TX_BUF = 512;
-#endif
 // Per-socket-op timeout. Some OPDS download endpoints are slow to send headers
 // (>15s) and chunked catalogs stall mid-body, so 15s killed them. 60s gives
 // slow servers room. esp_http_client's timeout_ms is uint32, so unlike Arduino
@@ -109,7 +106,6 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
 }
 #endif
 
-#if !defined(FREEINK_NET_WOLFSSL)
 // Streams a GET body through sink.write in READ_CHUNK pieces. Uses the manual
 // open/fetch_headers/read path rather than esp_http_client_perform(): perform()
 // pushes the whole body through an event callback and reports a chunked body
@@ -117,6 +113,7 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
 // large/slow files and surfaces a short read directly.
 HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
                                      Sink& sink) {
+  const bool requireHttps = url.rfind("https://", 0) == 0;
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.buffer_size = HTTP_RX_BUF;
@@ -158,6 +155,13 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   int status = esp_http_client_get_status_code(client);
   for (int hop = 0; isRedirect(status) && hop < MAX_REDIRECTS; ++hop) {
     if (esp_http_client_set_redirection(client) != ESP_OK) break;
+    char redirectedUrl[768] = {};
+    if (esp_http_client_get_url(client, redirectedUrl, sizeof(redirectedUrl)) != ESP_OK ||
+        (requireHttps && strncmp(redirectedUrl, "https://", 8) != 0)) {
+      LOG_ERR("HTTP", "refusing invalid or insecure redirect");
+      esp_http_client_cleanup(client);
+      return HttpDownloader::HTTP_ERROR;
+    }
     esp_http_client_close(client);
     err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
@@ -214,7 +218,6 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
   }
   return HttpDownloader::OK;
 }
-#endif  // !FREEINK_NET_WOLFSSL
 
 // All HTTP(S) fetches go through wolfSSL when it is the active TLS stack: it
 // speaks TLS 1.3 and reads large bodies from servers where the esp_http_client/
@@ -228,6 +231,8 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
   return runGet(url, username, password, sink);
 #endif
 }
+
+HttpDownloader::DownloadError runGetVerified(const std::string& url, Sink& sink) { return runGet(url, "", "", sink); }
 }  // namespace
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
@@ -256,6 +261,17 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   Sink sink;
   sink.write = onData;
   return runGetSecure(url, username, password, sink) == OK;
+}
+
+bool HttpDownloader::fetchUrlVerified(const std::string& url, const DataCallback& onData) {
+  if (url.rfind("https://", 0) != 0) {
+    LOG_ERR("HTTP", "Verified fetch requires HTTPS");
+    return false;
+  }
+  LOG_DBG("HTTP", "Fetching with verified CA bundle: %s", url.c_str());
+  Sink sink;
+  sink.write = onData;
+  return runGetVerified(url, sink) == OK;
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,

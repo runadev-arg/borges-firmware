@@ -63,6 +63,20 @@ def get_git_short_sha(project_dir):
     )
 
 
+def configure_reproducible_epoch(env):
+    """Pin compiler/ESP-IDF timestamps to the source commit."""
+    project_dir = env['PROJECT_DIR']
+    epoch = run_git_value(
+        project_dir, ['show', '-s', '--format=%ct', 'HEAD'], 'commit epoch'
+    )
+    if not epoch.isdigit():
+        warn('invalid commit epoch; reproducible timestamp was not configured')
+        return
+    os.environ['SOURCE_DATE_EPOCH'] = epoch
+    env['ENV']['SOURCE_DATE_EPOCH'] = epoch
+    print(f'Reproducible build epoch: {epoch}')
+
+
 def get_base_version(project_dir):
     ini_path = os.path.join(project_dir, 'platformio.ini')
     if not os.path.isfile(ini_path):
@@ -97,10 +111,13 @@ def inject_version(env):
 # so the git/version logic can be exercised without a full build.
 try:
     Import('env')           # noqa: F821  # type: ignore[name-defined]
+    configure_reproducible_epoch(env)  # noqa: F821  # type: ignore[name-defined]
     inject_version(env)     # noqa: F821  # type: ignore[name-defined]
 except NameError:
     class _Env(dict):
         def Append(self, **_): pass
 
     _project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    inject_version(_Env({'PIOENV': 'default', 'PROJECT_DIR': _project_dir}))
+    _standalone_env = _Env({'PIOENV': 'default', 'PROJECT_DIR': _project_dir, 'ENV': {}})
+    configure_reproducible_epoch(_standalone_env)
+    inject_version(_standalone_env)

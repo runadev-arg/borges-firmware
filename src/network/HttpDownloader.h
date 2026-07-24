@@ -39,6 +39,15 @@ class HttpDownloader {
                        const std::string& password = "");
 
   /**
+   * Stream through ESP-IDF's verified CA bundle even when wolfSSL is the
+   * general transport. Security
+   * metadata and content-addressed artifacts use
+   * this path so an insecure transport cannot replace both payload
+   * and hash.
+   */
+  static bool fetchUrlVerified(const std::string& url, const DataCallback& onData);
+
+  /**
    * Download a file to the SD card with optional credentials.
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,

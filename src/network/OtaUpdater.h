@@ -6,6 +6,7 @@ class OtaUpdater {
   bool updateAvailable = false;
   std::string latestVersion;
   std::string otaUrl;
+  std::string otaSha256;
   size_t otaSize = 0;
   size_t processedSize = 0;
   size_t totalSize = 0;
@@ -21,6 +22,8 @@ class OtaUpdater {
     UPDATE_OLDER_ERROR,
     INTERNAL_UPDATE_ERROR,
     OOM_ERROR,
+    INCOMPATIBLE_MANIFEST,
+    INTEGRITY_ERROR,
   };
 
   size_t getOtaSize() const { return otaSize; }

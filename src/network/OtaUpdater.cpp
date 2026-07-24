@@ -7,6 +7,7 @@
 #include "HttpDownloader.h"
 #include <Logging.h>
 #include <ReleaseJsonParser.h>
+#include <SHA2Builder.h>
 #include <esp_ota_ops.h>
 #include <esp_wifi.h>
 // clang-format on
@@ -14,7 +15,17 @@
 #include <string>
 
 namespace {
-constexpr char latestReleaseUrl[] = "https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/latest";
+constexpr char ownedManifestUrl[] = "https://highlights.runadev.com/api/releases/x4/stable/manifest.json";
+constexpr char ownedProduct[] = "crosspoint-toto";
+constexpr char ownedTarget[] = "xteink-x4-esp32c3";
+constexpr char ownedChannel[] = "stable";
+constexpr char ownedFirmwarePrefix[] = "https://github.com/totokatz/crosspoint-toto/releases/download/";
+constexpr uint32_t supportedManifestSchema = 1;
+constexpr uint32_t supportedSyncProtocol = 2;
+
+bool startsWith(const char* value, const char* prefix) {
+  return value && prefix && strncmp(value, prefix, strlen(prefix)) == 0;
+}
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
@@ -26,7 +37,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   // OOM there aborts. fetchUrl handles the verified-https GET, redirects, and
   // User-Agent (see HttpDownloader).
   ReleaseJsonParser releaseParser;
-  const bool ok = HttpDownloader::fetchUrl(latestReleaseUrl, [&releaseParser](const uint8_t* data, size_t len) {
+  const bool ok = HttpDownloader::fetchUrlVerified(ownedManifestUrl, [&releaseParser](const uint8_t* data, size_t len) {
     releaseParser.feed(reinterpret_cast<const char*>(data), len);
     return true;
   });
@@ -45,11 +56,22 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
 
   if (!releaseParser.foundFirmware()) {
     LOG_ERR("OTA", "No firmware.bin asset found");
-    return NO_UPDATE;
+    return JSON_PARSE_ERROR;
+  }
+
+  if (strcmp(releaseParser.getProduct(), ownedProduct) != 0 || strcmp(releaseParser.getTarget(), ownedTarget) != 0 ||
+      strcmp(releaseParser.getChannel(), ownedChannel) != 0 ||
+      releaseParser.getManifestSchema() != supportedManifestSchema || releaseParser.getSyncProtocolMin() == 0 ||
+      releaseParser.getSyncProtocolMin() > supportedSyncProtocol || releaseParser.getFirmwareSize() == 0 ||
+      strlen(releaseParser.getFirmwareSha256()) != 64 ||
+      !startsWith(releaseParser.getFirmwareUrl(), ownedFirmwarePrefix)) {
+    LOG_ERR("OTA", "Owned release manifest is incompatible");
+    return INCOMPATIBLE_MANIFEST;
   }
 
   latestVersion = releaseParser.getTagName();
   otaUrl = releaseParser.getFirmwareUrl();
+  otaSha256 = releaseParser.getFirmwareSha256();
   otaSize = releaseParser.getFirmwareSize();
   totalSize = otaSize;
   updateAvailable = true;
@@ -64,14 +86,20 @@ bool OtaUpdater::isUpdateNewer() const {
     return false;
   }
 
-  int currentMajor, currentMinor, currentPatch;
-  int latestMajor, latestMinor, latestPatch;
+  int currentMajor = 0, currentMinor = 0, currentPatch = 0;
+  int latestMajor = 0, latestMinor = 0, latestPatch = 0;
 
   const auto currentVersion = CROSSPOINT_VERSION;
 
   // semantic version check (only match on 3 segments)
-  sscanf(latestVersion.c_str(), "%d.%d.%d", &latestMajor, &latestMinor, &latestPatch);
-  sscanf(currentVersion, "%d.%d.%d", &currentMajor, &currentMinor, &currentPatch);
+  const char* latestStart = latestVersion.c_str();
+  if (*latestStart == 'v') latestStart++;
+  const char* currentStart = currentVersion;
+  if (*currentStart == 'v') currentStart++;
+  if (sscanf(latestStart, "%d.%d.%d", &latestMajor, &latestMinor, &latestPatch) != 3 ||
+      sscanf(currentStart, "%d.%d.%d", &currentMajor, &currentMinor, &currentPatch) != 3) {
+    return false;
+  }
 
   /*
    * Compare major versions.
@@ -99,6 +127,15 @@ bool OtaUpdater::isUpdateNewer() const {
     return true;
   }
 
+  int currentTotoRevision = 0;
+  int latestTotoRevision = 0;
+  const char* currentToto = strstr(currentStart, "-toto.");
+  const char* latestToto = strstr(latestStart, "-toto.");
+  if (currentToto && latestToto && sscanf(currentToto, "-toto.%d", &currentTotoRevision) == 1 &&
+      sscanf(latestToto, "-toto.%d", &latestTotoRevision) == 1) {
+    return latestTotoRevision > currentTotoRevision;
+  }
+
   return false;
 }
 
@@ -111,9 +148,10 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
 
   // esp_https_ota is hardwired to esp-tls/mbedTLS, whose precompiled build on this
   // package can't negotiate TLS 1.3 (see SecureClient.h). Drive the OTA partition
-  // ourselves and stream the firmware through HttpDownloader, which runs over
-  // wolfSSL when FREEINK_NET_WOLFSSL is set, reusing its redirect handling for the
-  // GitHub -> CDN hop.
+  // ourselves and stream the firmware through HttpDownloader's verified
+  // ESP-IDF CA-bundle path, reusing its redirect handling for the GitHub -> CDN
+  // hop. The generic reader downloads may use wolfSSL, but OTA metadata and
+  // bytes never use its insecure compatibility mode.
   const esp_partition_t* updatePartition = esp_ota_get_next_update_partition(nullptr);
   if (!updatePartition) {
     LOG_ERR("OTA", "No OTA partition available");
@@ -121,7 +159,11 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   }
 
   esp_ota_handle_t otaHandle = 0;
-  esp_err_t esp_err = esp_ota_begin(updatePartition, OTA_SIZE_UNKNOWN, &otaHandle);
+  if (otaSize > updatePartition->size) {
+    LOG_ERR("OTA", "Firmware does not fit OTA partition: %zu > %zu", otaSize, updatePartition->size);
+    return INCOMPATIBLE_MANIFEST;
+  }
+  esp_err_t esp_err = esp_ota_begin(updatePartition, otaSize, &otaHandle);
   if (esp_err != ESP_OK) {
     LOG_ERR("OTA", "esp_ota_begin failed: %s", esp_err_to_name(esp_err));
     return INTERNAL_UPDATE_ERROR;
@@ -133,11 +175,19 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   processedSize = 0;
   int lastReportedPct = -1;
   bool flashOk = true;
-  const bool fetchOk = HttpDownloader::fetchUrl(otaUrl, [&](const uint8_t* data, size_t len) {
+  bool integrityOk = true;
+  SHA256Builder firmwareHash;
+  firmwareHash.begin();
+  const bool fetchOk = HttpDownloader::fetchUrlVerified(otaUrl, [&](const uint8_t* data, size_t len) {
+    if (processedSize > otaSize || len > otaSize - processedSize) {
+      integrityOk = false;
+      return false;
+    }
     if (esp_ota_write(otaHandle, data, len) != ESP_OK) {
       flashOk = false;
       return false;  // abort the transfer
     }
+    firmwareHash.add(data, len);
     processedSize += len;
     // Fire the callback only on whole-percent change. Per-chunk updates wake the
     // render task, whose framebuffer work contends with TLS on the internal arena,
@@ -155,10 +205,20 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   /* Return back to default power saving for WiFi in case of failing */
   esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 
-  if (!fetchOk || !flashOk) {
+  if (!fetchOk || !flashOk || !integrityOk) {
     LOG_ERR("OTA", "Firmware install failed (%s)", flashOk ? "download" : "flash write");
     esp_ota_abort(otaHandle);
+    if (!integrityOk) return INTEGRITY_ERROR;
     return flashOk ? HTTP_ERROR : INTERNAL_UPDATE_ERROR;
+  }
+
+  firmwareHash.calculate();
+  char actualSha256[65] = {};
+  firmwareHash.getChars(actualSha256);
+  if (processedSize != otaSize || strcmp(actualSha256, otaSha256.c_str()) != 0) {
+    LOG_ERR("OTA", "Firmware integrity mismatch: bytes=%zu expected=%zu", processedSize, otaSize);
+    esp_ota_abort(otaHandle);
+    return INTEGRITY_ERROR;
   }
 
   esp_err = esp_ota_end(otaHandle);  // verifies the written image

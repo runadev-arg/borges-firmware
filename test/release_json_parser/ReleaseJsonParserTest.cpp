@@ -598,3 +598,69 @@ TEST(ReleaseJsonParser, ChunkedRealisticEveryBoundary) {
     EXPECT_EQ(p.getFirmwareSize(), 9999u) << "split=" << split;
   }
 }
+
+TEST(ReleaseJsonParser, OwnedTotoManifest) {
+  const char* json = R"({
+    "manifest_schema": 1,
+    "product": "crosspoint-toto",
+    "target": "xteink-x4-esp32c3",
+    "channel": "stable",
+    "version": "1.4.1-toto.1",
+    "sync_protocol_min": 2,
+    "firmware": {
+      "url": "https://github.com/totokatz/crosspoint-toto/releases/download/toto-v1.4.1/firmware.bin",
+      "size": 5553824,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "rollback": {
+      "version": "1.4.1-rc",
+      "manifest_url": "/api/releases/x4/known-good/manifest.json"
+    }
+  })";
+
+  ReleaseJsonParser p;
+  p.feed(json, strlen(json));
+
+  EXPECT_TRUE(p.foundTag());
+  EXPECT_TRUE(p.foundFirmware());
+  EXPECT_STREQ(p.getTagName(), "1.4.1-toto.1");
+  EXPECT_STREQ(p.getProduct(), "crosspoint-toto");
+  EXPECT_STREQ(p.getTarget(), "xteink-x4-esp32c3");
+  EXPECT_STREQ(p.getChannel(), "stable");
+  EXPECT_EQ(p.getManifestSchema(), 1u);
+  EXPECT_EQ(p.getSyncProtocolMin(), 2u);
+  EXPECT_EQ(p.getFirmwareSize(), 5553824u);
+  EXPECT_STREQ(p.getFirmwareSha256(), "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+}
+
+TEST(ReleaseJsonParser, OwnedManifestSurvivesEveryChunkBoundary) {
+  const char* json =
+      R"({"manifest_schema":1,"product":"crosspoint-toto","target":"xteink-x4-esp32c3","channel":"stable","version":"1.4.2","sync_protocol_min":2,"firmware":{"url":"https://github.com/totokatz/crosspoint-toto/releases/download/v/firmware.bin","size":42,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}})";
+  const size_t len = strlen(json);
+  for (size_t split = 0; split <= len; ++split) {
+    ReleaseJsonParser p;
+    if (split > 0) p.feed(json, split);
+    if (split < len) p.feed(json + split, len - split);
+    EXPECT_TRUE(p.foundTag()) << "split=" << split;
+    EXPECT_TRUE(p.foundFirmware()) << "split=" << split;
+    EXPECT_STREQ(p.getFirmwareSha256(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        << "split=" << split;
+  }
+}
+
+TEST(ReleaseJsonParser, RejectsMalformedFirmwareDigest) {
+  for (const char* digest : {
+           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+           "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+           "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+       }) {
+    const std::string json =
+        std::string(R"({"version":"1.4.2","firmware":{"url":"https://owned/fw","size":42,"sha256":")") + digest +
+        R"("}})";
+    ReleaseJsonParser p;
+    p.feed(json.data(), json.size());
+    EXPECT_TRUE(p.foundFirmware());
+    EXPECT_STREQ(p.getFirmwareSha256(), "");
+  }
+}
