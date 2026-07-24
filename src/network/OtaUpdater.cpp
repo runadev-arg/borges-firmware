@@ -19,7 +19,7 @@ constexpr char ownedManifestUrl[] = "https://highlights.runadev.com/api/releases
 constexpr char ownedProduct[] = "crosspoint-toto";
 constexpr char ownedTarget[] = "xteink-x4-esp32c3";
 constexpr char ownedChannel[] = "stable";
-constexpr char ownedFirmwarePrefix[] = "https://github.com/totokatz/crosspoint-toto/releases/download/";
+constexpr char ownedFirmwarePrefix[] = "https://github.com/runadev-arg/crosspoint-toto/releases/download/";
 constexpr uint32_t supportedManifestSchema = 1;
 constexpr uint32_t supportedSyncProtocol = 2;
 

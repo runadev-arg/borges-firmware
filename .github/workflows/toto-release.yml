@@ -66,7 +66,7 @@ jobs:
           root = pathlib.Path("dist")
           tag = os.environ["GITHUB_REF_NAME"]
           version = tag.removeprefix("toto-v")
-          base = f"https://github.com/totokatz/crosspoint-toto/releases/download/{tag}"
+          base = f"https://github.com/runadev-arg/crosspoint-toto/releases/download/{tag}"
 
           def descriptor(name):
               data = (root / name).read_bytes()
