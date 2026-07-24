@@ -106,4 +106,20 @@ TEST(TotoProgress, OnlySafeDirectivesAutoApply) {
   EXPECT_EQ(toto::parseProgressDirective("future_value"), toto::ProgressDirective::UNKNOWN);
 }
 
+TEST(TotoAnnotations, BoundsUtf8AndBuildsStableIdentities) {
+  const std::string accented = "página sincronizada";
+  EXPECT_EQ(toto::boundedUtf8(accented, 2), "p");
+  EXPECT_EQ(toto::boundedUtf8(accented, 7), "página");
+  EXPECT_EQ(toto::boundedUtf8(accented, 100), accented);
+
+  const auto syncId = toto::legacyBookmarkSyncId("abcdef", "/body/p[1]", 1250);
+  EXPECT_TRUE(toto::isUuid(syncId));
+  EXPECT_EQ(syncId, toto::legacyBookmarkSyncId("abcdef", "/body/p[1]", 1250));
+  EXPECT_NE(syncId, toto::legacyBookmarkSyncId("abcdef", "/body/p[2]", 1250));
+
+  const auto first = toto::annotationFingerprint(syncId, "passage", "note", "/body/p[1]", 1250);
+  EXPECT_EQ(first, toto::annotationFingerprint(syncId, "passage", "note", "/body/p[1]", 1250));
+  EXPECT_NE(first, toto::annotationFingerprint(syncId, "passage", "edited", "/body/p[1]", 1250));
+}
+
 }  // namespace

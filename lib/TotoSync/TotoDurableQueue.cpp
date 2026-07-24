@@ -45,6 +45,16 @@ void recoverAtomic(const std::string& finalPath) {
   Storage.remove((finalPath + ".tmp").c_str());
 }
 
+std::optional<uint64_t> decimalSequence(const char* value) {
+  if (value == nullptr || *value == '\0') return std::nullopt;
+  uint64_t parsed = 0;
+  const char* end = value;
+  while (*end != '\0') ++end;
+  const auto result = std::from_chars(value, end, parsed);
+  if (result.ec != std::errc{} || result.ptr != end) return std::nullopt;
+  return parsed;
+}
+
 }  // namespace
 
 DurableQueue& DurableQueue::instance() {
@@ -196,7 +206,8 @@ bool DurableQueue::retireAcknowledged(std::string_view eventId, uint64_t sequenc
 }
 
 bool DurableQueue::deferPulled(uint64_t serverSequence, const std::string& eventJson) {
-  if ((!initialized && !begin()) || serverSequence == 0 || eventJson.empty() || eventJson.size() > MAX_EVENT_BYTES) {
+  if ((!initialized && !begin()) || serverSequence == 0 || eventJson.empty() ||
+      eventJson.size() > MAX_INBOX_EVENT_BYTES) {
     return false;
   }
   std::array<char, 40> filename{};
@@ -232,6 +243,17 @@ std::optional<ProgressInboxItem> DurableQueue::nextApplicableProgress(std::strin
   return newest;
 }
 
+std::optional<AnnotationInboxItem> DurableQueue::nextAnnotation(std::string_view bookHash,
+                                                                uint64_t afterSequence) const {
+  std::optional<AnnotationInboxItem> oldest;
+  for (const String& filename : Storage.listFiles(INBOX_DIR, MAX_QUEUE_SCAN)) {
+    const auto item = readAnnotationInbox(filename.c_str());
+    if (!item || item->bookHash != bookHash || item->serverSequence <= afterSequence) continue;
+    if (!oldest || item->serverSequence < oldest->serverSequence) oldest = item;
+  }
+  return oldest;
+}
+
 bool DurableQueue::acceptProgress(const ProgressInboxItem& item) {
   const uint64_t serverSequence = item.serverSequence;
   std::array<char, 72> source{};
@@ -253,6 +275,8 @@ bool DurableQueue::acceptProgress(const ProgressInboxItem& item) {
 }
 
 bool DurableQueue::resolveProgress(uint64_t serverSequence) { return removeInboxFile(serverSequence); }
+
+bool DurableQueue::resolveInbox(uint64_t serverSequence) { return removeInboxFile(serverSequence); }
 
 bool DurableQueue::resolveProgressThrough(std::string_view bookHash, uint64_t serverSequence) {
   bool removed = true;
@@ -374,7 +398,7 @@ std::optional<ProgressInboxItem> DurableQueue::readProgressInbox(std::string_vie
 
   const std::string path = std::string(INBOX_DIR) + "/" + std::string(filename);
   const String body = Storage.readFile(path.c_str());
-  if (body.isEmpty() || body.length() > MAX_EVENT_BYTES) return std::nullopt;
+  if (body.isEmpty() || body.length() > MAX_INBOX_EVENT_BYTES) return std::nullopt;
   JsonDocument event;
   if (deserializeJson(event, body) || std::string(event["event_type"] | "") != "progress.changed") {
     return std::nullopt;
@@ -396,6 +420,55 @@ std::optional<ProgressInboxItem> DurableQueue::readProgressInbox(std::string_vie
       source["xpointer"].isNull() ? std::string(payload["xpointer"] | "") : source["xpointer"].as<std::string>();
   item.accepted = accepted;
   if (item.bookHash.size() != 32 || item.percentage < 0 || item.percentage > 100) return std::nullopt;
+  return item;
+}
+
+std::optional<AnnotationInboxItem> DurableQueue::readAnnotationInbox(std::string_view filename) {
+  if (!filename.ends_with(".json") || filename.size() < 20) return std::nullopt;
+  uint64_t serverSequence = 0;
+  const auto parsed = std::from_chars(filename.data(), filename.data() + 20, serverSequence);
+  if (parsed.ec != std::errc{} || parsed.ptr != filename.data() + 20 || serverSequence == 0) {
+    return std::nullopt;
+  }
+
+  const std::string path = std::string(INBOX_DIR) + "/" + std::string(filename);
+  const String body = Storage.readFile(path.c_str());
+  if (body.isEmpty() || body.length() > MAX_INBOX_EVENT_BYTES) return std::nullopt;
+  JsonDocument event;
+  if (deserializeJson(event, body)) return std::nullopt;
+  const std::string eventType = event["event_type"] | "";
+  if (eventType.rfind("annotation.", 0) != 0 && eventType.rfind("bookmark.", 0) != 0) {
+    return std::nullopt;
+  }
+
+  const JsonObjectConst payload = event["payload"].as<JsonObjectConst>();
+  AnnotationInboxItem item;
+  item.serverSequence = serverSequence;
+  item.directive = event["directive"] | "";
+  item.eventType = eventType;
+  item.bookHash = event["book_identifier"]["value"] | "";
+  item.syncId =
+      payload["sync_id"].isNull() ? std::string(event["aggregate_id"] | "") : payload["sync_id"].as<std::string>();
+  item.text = boundedUtf8(payload["text"] | "", 3584);
+  item.note = boundedUtf8(payload["note"] | "", 768);
+  item.xpointer = boundedUtf8(payload["xpointer"] | "", 512);
+  item.percentage = payload["percentage"] | 0.0;
+  if (payload["percentage"].isNull()) {
+    const double page = payload["page"] | 0.0;
+    const double totalPages = payload["total_pages"] | 0.0;
+    if (totalPages > 0) item.percentage = std::clamp(page / totalPages * 100.0, 0.0, 100.0);
+  }
+  item.spineIndex = payload["position"]["spine_index"] | static_cast<uint16_t>(0);
+  item.chapterPageCount = payload["position"]["chapter_page_count"] | static_cast<uint16_t>(0);
+  item.chapterProgress = payload["position"]["chapter_progress"] | static_cast<uint16_t>(0);
+  item.deleted = eventType == "annotation.deleted" || eventType == "bookmark.deleted";
+  item.conflict =
+      item.directive == "annotation_conflict" || (event["directive_metadata"]["annotation_conflict"] | false);
+  const char* revision = event["directive_metadata"]["annotation_revision"] | "";
+  if (const auto value = decimalSequence(revision)) item.revision = *value;
+  if (item.bookHash.size() != 32 || !isUuid(item.syncId) || item.percentage < 0 || item.percentage > 100) {
+    return std::nullopt;
+  }
   return item;
 }
 

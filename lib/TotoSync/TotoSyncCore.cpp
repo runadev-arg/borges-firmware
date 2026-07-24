@@ -287,4 +287,37 @@ bool shouldAutoApply(ProgressDirective directive) {
          directive == ProgressDirective::EQUIVALENT;
 }
 
+std::string boundedUtf8(std::string_view value, size_t maxBytes) {
+  if (value.size() <= maxBytes) return std::string(value);
+  size_t size = maxBytes;
+  while (size > 0 && (static_cast<unsigned char>(value[size]) & 0xC0U) == 0x80U) --size;
+  return std::string(value.substr(0, size));
+}
+
+std::string annotationFingerprint(std::string_view syncId, std::string_view text, std::string_view note,
+                                  std::string_view xpointer, uint32_t basisPoints) {
+  std::string seed;
+  seed.reserve(syncId.size() + text.size() + note.size() + xpointer.size() + 32);
+  seed.append(syncId);
+  seed.push_back('|');
+  seed.append(text);
+  seed.push_back('|');
+  seed.append(note);
+  seed.push_back('|');
+  seed.append(xpointer);
+  seed.push_back('|');
+  seed.append(std::to_string(basisPoints));
+  return deterministicUuid(seed);
+}
+
+std::string legacyBookmarkSyncId(std::string_view bookHash, std::string_view xpointer, uint32_t basisPoints) {
+  std::string seed = "crosspoint-bookmark:";
+  seed.append(bookHash);
+  seed.push_back('|');
+  seed.append(xpointer);
+  seed.push_back('|');
+  seed.append(std::to_string(basisPoints));
+  return deterministicUuid(seed);
+}
+
 }  // namespace toto

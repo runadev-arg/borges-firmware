@@ -33,6 +33,7 @@
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
+#include "TotoBookmarkSync.h"
 #include "TotoDurableQueue.h"
 #include "TotoReadingEvents.h"
 #include "components/UITheme.h"
@@ -1863,6 +1864,8 @@ void EpubReaderActivity::loadCachedBookmarks() {
   }
 
   BookmarkFile::load(epub->getPath(), cachedBookmarks);
+  TOTO_BOOKMARK_SYNC.reconcile(epub->getPath(), epub->getTitle(), epub->getAuthor(), cachedBookmarks,
+                               BookmarkFile::save);
   updateBookmarkFlag();
 }
 
@@ -1881,6 +1884,19 @@ void EpubReaderActivity::addBookmark() {
 
   SavedProgressPosition progress = ProgressMapper::toSavedProgress(epub, getCurrentPosition());
   const ProgressRange pageRange = getPageProgressRange(epub, currentSpineIndex, currentPage, pageCount);
+
+  bool deletionReady = true;
+  for (const BookmarkEntry& bookmark : cachedBookmarks) {
+    if (bookmarkMatchesProgress(bookmark, currentSpineIndex, currentPage, pageCount, pageRange)) {
+      deletionReady =
+          TOTO_BOOKMARK_SYNC.enqueueLocalDelete(epub->getPath(), epub->getTitle(), epub->getAuthor(), bookmark) &&
+          deletionReady;
+    }
+  }
+  if (!deletionReady) {
+    LOG_ERR("ERS", "Bookmark deletion not committed to Toto outbox");
+    return;
+  }
 
   const size_t bookmarkCountBeforeToggle = cachedBookmarks.size();
   cachedBookmarks.erase(std::remove_if(cachedBookmarks.begin(), cachedBookmarks.end(),
@@ -1904,6 +1920,9 @@ void EpubReaderActivity::addBookmark() {
     entry.computedSpineIndex = currentSpineIndex;
     entry.computedChapterPageCount = pageCount;
     entry.computedChapterProgress = currentPage;
+    if (!TOTO_BOOKMARK_SYNC.enqueueLocalUpsert(epub->getPath(), epub->getTitle(), epub->getAuthor(), entry, pageText)) {
+      LOG_ERR("ERS", "Bookmark saved locally; Toto outbox will retry on reopen");
+    }
     cachedBookmarks.insert(cachedBookmarks.begin(), entry);
     bookmarkRemoved = false;
     currentPageBookmarked = true;

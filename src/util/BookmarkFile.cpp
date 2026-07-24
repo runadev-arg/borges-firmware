@@ -26,6 +26,13 @@ bool BookmarkFile::load(const std::string& bookPath, std::vector<BookmarkEntry>&
     bookmark.xpath = obj["xpath"] | "";
     bookmark.percentage = obj["percentage"] | static_cast<float>(0);
     bookmark.summary = obj["summary"] | "";
+    bookmark.totoSyncId = obj["toto_id"] | "";
+    bookmark.totoNote = obj["toto_note"] | "";
+    bookmark.totoFingerprint = obj["toto_fp"] | "";
+    bookmark.totoPendingEventId = obj["toto_event"] | "";
+    bookmark.totoRevision = obj["toto_rev"] | static_cast<uint64_t>(0);
+    bookmark.totoPendingSequence = obj["toto_seq"] | static_cast<uint64_t>(0);
+    bookmark.totoConflict = obj["toto_conflict"] | false;
     bookmark.computedSpineIndex = obj["si"] | static_cast<uint16_t>(0);
     bookmark.computedChapterPageCount = obj["pc"] | static_cast<uint16_t>(0);
     bookmark.computedChapterProgress = obj["pp"] | static_cast<uint16_t>(0);
@@ -44,6 +51,13 @@ bool BookmarkFile::save(const std::string& bookPath, const std::vector<BookmarkE
     obj["xpath"] = bookmark.xpath;
     obj["percentage"] = bookmark.percentage;
     obj["summary"] = bookmark.summary;
+    if (!bookmark.totoSyncId.empty()) obj["toto_id"] = bookmark.totoSyncId;
+    if (!bookmark.totoNote.empty()) obj["toto_note"] = bookmark.totoNote;
+    if (!bookmark.totoFingerprint.empty()) obj["toto_fp"] = bookmark.totoFingerprint;
+    if (!bookmark.totoPendingEventId.empty()) obj["toto_event"] = bookmark.totoPendingEventId;
+    if (bookmark.totoRevision > 0) obj["toto_rev"] = bookmark.totoRevision;
+    if (bookmark.totoPendingSequence > 0) obj["toto_seq"] = bookmark.totoPendingSequence;
+    if (bookmark.totoConflict) obj["toto_conflict"] = true;
     obj["si"] = bookmark.computedSpineIndex;
     obj["pc"] = bookmark.computedChapterPageCount;
     obj["pp"] = bookmark.computedChapterProgress;

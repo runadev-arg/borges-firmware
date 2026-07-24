@@ -70,5 +70,9 @@ bool acknowledgmentMatches(std::string_view eventId, uint64_t sequence, std::str
                            std::string_view acknowledgedSequence);
 ProgressDirective parseProgressDirective(std::string_view value);
 bool shouldAutoApply(ProgressDirective directive);
+std::string boundedUtf8(std::string_view value, size_t maxBytes);
+std::string annotationFingerprint(std::string_view syncId, std::string_view text, std::string_view note,
+                                  std::string_view xpointer, uint32_t basisPoints);
+std::string legacyBookmarkSyncId(std::string_view bookHash, std::string_view xpointer, uint32_t basisPoints);
 
 }  // namespace toto

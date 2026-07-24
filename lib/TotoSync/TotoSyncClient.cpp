@@ -46,6 +46,10 @@ std::string clientTelemetry(size_t queueDepth) {
   capabilities["atomic_outbox"] = true;
   capabilities["dual_checkpoint"] = true;
   capabilities["bounded_pull"] = PULL_LIMIT;
+  capabilities["annotation_revisions"] = true;
+  capabilities["annotation_conflicts"] = true;
+  capabilities["annotation_tombstones"] = true;
+  capabilities["max_annotation_bytes"] = DurableQueue::MAX_EVENT_BYTES;
   std::string value;
   serializeJson(client, value);
   return value;
@@ -95,10 +99,11 @@ int post(const std::string& path, const std::string& body, std::string& response
 }
 
 bool shouldDefer(JsonObjectConst event) {
+  const std::string type = event["event_type"] | "";
+  if (type.rfind("annotation.", 0) == 0 || type.rfind("bookmark.", 0) == 0) return true;
   const std::string directive = event["directive"] | "";
   if (directive == "own" || directive == "keep_local" || directive == "equivalent") return false;
-  const std::string type = event["event_type"] | "";
-  return type == "progress.changed" || type.rfind("annotation.", 0) == 0 || type.rfind("bookmark.", 0) == 0;
+  return type == "progress.changed";
 }
 
 }  // namespace
