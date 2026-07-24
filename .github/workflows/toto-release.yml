@@ -39,7 +39,7 @@ jobs:
           ctest --test-dir build/test --output-on-failure -j
 
       - name: Build current Toto firmware
-        run: pio run -e toto_release
+        run: SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" pio run -e toto_release
 
       - name: Build pinned known-good firmware
         env:
@@ -48,7 +48,8 @@ jobs:
         run: |
           git worktree add "$RUNNER_TEMP/crosspoint-known-good" "$KNOWN_GOOD_COMMIT"
           git -C "$RUNNER_TEMP/crosspoint-known-good" submodule update --init --recursive
-          pio run --project-dir "$RUNNER_TEMP/crosspoint-known-good" -e gh_release_rc
+          SOURCE_DATE_EPOCH="$(git -C "$RUNNER_TEMP/crosspoint-known-good" show -s --format=%ct HEAD)" \
+            pio run --project-dir "$RUNNER_TEMP/crosspoint-known-good" -e gh_release_rc
 
       - name: Assemble target-bound manifests
         env:
