@@ -39,6 +39,8 @@ void CredentialStore::toJson(JsonDocument& doc) const {
   doc["pairingExpiresAt"] = pairingExpiresAt;
   doc["pairingIntervalSeconds"] = pairingIntervalSeconds;
   doc["lastError"] = lastError;
+  doc["serverIp"] = serverIp;
+  doc["serverIpHost"] = serverIpHost;
 }
 
 bool CredentialStore::fromJson(JsonVariantConst doc) {
@@ -57,6 +59,10 @@ bool CredentialStore::fromJson(JsonVariantConst doc) {
   pairingExpiresAt = doc["pairingExpiresAt"] | static_cast<uint64_t>(0);
   pairingIntervalSeconds = std::clamp<uint32_t>(doc["pairingIntervalSeconds"] | 5U, 2U, 60U);
   lastError = doc["lastError"] | "";
+  // Additive fields: absent in a pre-1.4.1-toto.8 file, which reads as "" and
+  // needs no migration, so CONFIG_VERSION stays put.
+  serverIp = doc["serverIp"] | "";
+  serverIpHost = doc["serverIpHost"] | "";
 
   if ((doc["cfgVersion"] | 0U) < CONFIG_VERSION) needsResave = true;
   if (needsResave) requestResave();
@@ -98,13 +104,32 @@ void CredentialStore::clearCredential() {
 
 void CredentialStore::setBaseUrl(std::string value) {
   value = stripTrailingSlashes(std::move(value));
-  if (value.rfind("https://", 0) == 0) baseUrl = std::move(value);
+  if (value.rfind("https://", 0) != 0) return;
+  if (value != baseUrl) clearServerIp();  // a cached IP belongs to the old host
+  baseUrl = std::move(value);
 }
 
 void CredentialStore::setLastError(std::string value) {
-  constexpr size_t MAX_ERROR_LENGTH = 160;
+  // The failure detail now carries the clock triage plus the resolution and TLS
+  // tags and reaches ~180 chars; truncating in the middle of the most
+  // informative tag is exactly what this field exists to avoid.
+  constexpr size_t MAX_ERROR_LENGTH = 200;
   if (value.size() > MAX_ERROR_LENGTH) value.resize(MAX_ERROR_LENGTH);
   lastError = std::move(value);
+}
+
+void CredentialStore::setServerIp(std::string host, std::string ip) {
+  if (host.empty() || ip.empty()) {
+    clearServerIp();
+    return;
+  }
+  serverIpHost = std::move(host);
+  serverIp = std::move(ip);
+}
+
+void CredentialStore::clearServerIp() {
+  serverIp.clear();
+  serverIpHost.clear();
 }
 
 }  // namespace toto

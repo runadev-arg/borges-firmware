@@ -58,6 +58,11 @@ std::optional<Checkpoint> selectNewestCheckpoint(const std::vector<uint8_t>& fir
 
 uint32_t exponentialBackoffMs(uint8_t failureCount, uint32_t entropy);
 ResolvedTime resolveWallTime(const Checkpoint& checkpoint, uint32_t currentBootId, uint32_t monotonicNowMs);
+// Days since 1970-01-01 for a proleptic Gregorian civil date (Howard
+// Hinnant's days_from_civil). It exists because mktime applies the process
+// timezone and timegm is a non-portable extension: both silently corrupt a UTC
+// conversion. Assumes an already validated date.
+int64_t daysFromCivil(int year, unsigned month, unsigned day);
 std::string formatRfc3339(uint64_t unixSeconds);
 std::optional<uint64_t> parseRfc3339Utc(std::string_view value);
 const char* timePrecisionName(TimePrecision precision);

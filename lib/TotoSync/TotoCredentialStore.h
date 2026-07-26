@@ -20,6 +20,10 @@ class CredentialStore : public PersistableStore<CredentialStore> {
   uint64_t pairingExpiresAt = 0;
   uint32_t pairingIntervalSeconds = 5;
   std::string lastError;
+  // Last known good IPv4 of the server ("104.21.0.166") and the host it belongs
+  // to, so a changed baseUrl cannot resurrect a stale address.
+  std::string serverIp;
+  std::string serverIpHost;
 
   CredentialStore() = default;
   friend class PersistableStore<CredentialStore>;
@@ -49,6 +53,11 @@ class CredentialStore : public PersistableStore<CredentialStore> {
   uint32_t getPairingIntervalSeconds() const { return pairingIntervalSeconds; }
   const std::string& getLastError() const { return lastError; }
   void setLastError(std::string value);
+
+  const std::string& getServerIp() const { return serverIp; }
+  const std::string& getServerIpHost() const { return serverIpHost; }
+  void setServerIp(std::string host, std::string ip);  // both or neither
+  void clearServerIp();
 };
 
 bool bootstrapCrossPointServices();

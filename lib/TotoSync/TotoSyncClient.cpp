@@ -10,6 +10,7 @@
 
 #include "TotoCredentialStore.h"
 #include "TotoDurableQueue.h"
+#include "TotoNetBoot.h"
 #include "TotoTrust.h"
 
 #ifndef CROSSPOINT_VERSION
@@ -74,13 +75,24 @@ std::string pullBody(uint64_t cursor, size_t queueDepth) {
 }
 
 int post(const std::string& path, const std::string& body, std::string& response) {
-  if (TOTO_CREDENTIALS.getBaseUrl().rfind("https://", 0) != 0) return -3;
+  // Same bootstrap as pairing: without it the sync stays dead on exactly the
+  // networks the pairing fix was written for. No candidate loop here -- the
+  // scheduler already retries.
+  netboot::WifiFullPowerScope wifiFullPower;
+  const std::string baseUrl = TOTO_CREDENTIALS.getBaseUrl();
+  if (baseUrl.rfind("https://", 0) != 0) return -3;
+  const std::string host = netboot::hostFromBaseUrl(baseUrl);
+  if (host.empty()) return -3;
+  const netboot::Candidates candidates = netboot::resolveServer(host.c_str());  // memoized
+  if (candidates.count == 0) return -1;
+
   freeink::SecureHttpClient http;
   http.setCACert(rootCertificate());
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setReuse(false);
   http.setUserAgent(std::string("CrossPoint-Toto/") + CROSSPOINT_VERSION);
-  if (!http.begin(TOTO_CREDENTIALS.getBaseUrl() + path)) return -1;
+  if (!http.begin(baseUrl + path)) return -1;
+  http.setServerAddress(candidates.ip[0]);  // begin() FIRST, pin AFTER
   http.addHeader("Accept", "application/json");
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", "Bearer " + TOTO_CREDENTIALS.getToken());

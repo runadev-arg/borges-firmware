@@ -146,6 +146,16 @@ ResolvedTime resolveWallTime(const Checkpoint& checkpoint, uint32_t currentBootI
   return {checkpoint.wallAnchorUnixSeconds, TimePrecision::APPROXIMATE};
 }
 
+int64_t daysFromCivil(int year, unsigned month, unsigned day) {
+  const int adjustedYear = year - (month <= 2 ? 1 : 0);
+  const int era = (adjustedYear >= 0 ? adjustedYear : adjustedYear - 399) / 400;
+  const unsigned yearOfEra = static_cast<unsigned>(adjustedYear - era * 400);
+  const unsigned adjustedMonth = month > 2 ? month - 3U : month + 9U;
+  const unsigned dayOfYear = (153U * adjustedMonth + 2U) / 5U + day - 1U;
+  const unsigned dayOfEra = yearOfEra * 365U + yearOfEra / 4U - yearOfEra / 100U + dayOfYear;
+  return static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(dayOfEra) - 719468;
+}
+
 std::string formatRfc3339(uint64_t unixSeconds) {
   if (unixSeconds > static_cast<uint64_t>(std::numeric_limits<std::time_t>::max())) {
     return {};
@@ -197,13 +207,7 @@ std::optional<uint64_t> parseRfc3339Utc(std::string_view value) {
   const unsigned maxDay = *month == 2U && leapYear ? 29U : DAYS_PER_MONTH[*month - 1U];
   if (*day < 1U || *day > maxDay) return std::nullopt;
 
-  const int adjustedYear = static_cast<int>(*year) - (*month <= 2 ? 1 : 0);
-  const int era = adjustedYear / 400;
-  const unsigned yearOfEra = static_cast<unsigned>(adjustedYear - era * 400);
-  const unsigned adjustedMonth = *month > 2 ? *month - 3U : *month + 9U;
-  const unsigned dayOfYear = (153U * adjustedMonth + 2U) / 5U + *day - 1U;
-  const unsigned dayOfEra = yearOfEra * 365U + yearOfEra / 4U - yearOfEra / 100U + dayOfYear;
-  const int64_t days = static_cast<int64_t>(era) * 146097 + dayOfEra - 719468;
+  const int64_t days = daysFromCivil(static_cast<int>(*year), *month, *day);
   if (days < 0) return std::nullopt;
   return static_cast<uint64_t>(days) * 86400U + *hour * 3600U + *minute * 60U + *second;
 }

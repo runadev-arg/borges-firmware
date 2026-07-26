@@ -18,6 +18,17 @@ OVERRIDES = f"""
    heap, and TLS cert verification allocates dozens at once. */
 #undef FP_MAX_BITS
 #define FP_MAX_BITS 8192
+/* Let's Encrypt Gen-Y signs both the leaf and the YE2 intermediate with
+   ecdsa-with-SHA384; without SHA-384 compiled in, certificate verification
+   dies with HASH_TYPE_E (-232, seen on device once ALT_CERT_CHAINS let the
+   chain through). SHA-384 is implemented by the SHA-512 core, so both are
+   enabled together. */
+#ifndef WOLFSSL_SHA384
+#define WOLFSSL_SHA384
+#endif
+#ifndef WOLFSSL_SHA512
+#define WOLFSSL_SHA512
+#endif
 """
 
 

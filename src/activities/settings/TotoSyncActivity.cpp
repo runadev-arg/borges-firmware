@@ -114,6 +114,14 @@ void TotoSyncActivity::performPendingAction() {
         resultText = tr(STR_TOTO_PAIR_SUCCESS);
       } else {
         resultText = std::string(tr(STR_TOTO_FAILED)) + ": " + toto::PairingClient::resultName(result);
+        // Diagnostic tail: transport stage ("tls:-188", "tcp", ...) or the HTTP
+        // status when the server did answer. Without this the device can only
+        // say "network_error" and the field-debugging loop is blind.
+        if (!toto::PairingClient::lastErrorDetail.empty()) {
+          resultText += " [" + toto::PairingClient::lastErrorDetail + "]";
+        } else if (toto::PairingClient::lastHttpCode > 0) {
+          resultText += " [http " + std::to_string(toto::PairingClient::lastHttpCode) + "]";
+        }
       }
     }
   } else if (pendingAction == Action::Sync) {
@@ -180,7 +188,15 @@ void TotoSyncActivity::render(RenderLock&&) {
     std::snprintf(resumeLine.data(), resumeLine.size(), tr(STR_TOTO_RESUME_AT), progressDecision->percentage);
     renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 64, resumeLine.data(), true, EpdFontFamily::BOLD);
   } else if (!resultText.empty()) {
-    renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 64, resultText.c_str());
+    // Diagnostic tails ("[clock ip:... dns:fail ...]") exceed one screen line;
+    // wrap instead of clipping the very detail the failure screen exists for.
+    const int contentWidth = width - 2 * metrics.contentSidePadding;
+    auto lines = renderer.wrappedText(UI_10_FONT_ID, resultText.c_str(), contentWidth, 3);
+    int lineY = summaryTop + 64;
+    for (const auto& line : lines) {
+      renderer.drawCenteredText(UI_10_FONT_ID, lineY, line.c_str());
+      lineY += renderer.getLineHeight(UI_10_FONT_ID);
+    }
   }
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + 86;

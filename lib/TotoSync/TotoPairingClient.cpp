@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <Logging.h>
 #include <SecureHttpClient.h>
+#include <WiFi.h>
 #include <base64.h>
 #include <esp_random.h>
 
@@ -11,6 +12,7 @@
 #include <string>
 
 #include "TotoCredentialStore.h"
+#include "TotoNetBoot.h"
 #include "TotoTrust.h"
 
 #ifndef CROSSPOINT_VERSION
@@ -25,39 +27,20 @@ constexpr uint32_t MIN_BLOCK_FOR_TLS = 20000;
 constexpr uint32_t HTTP_TIMEOUT_MS = 15000;
 constexpr size_t MAX_RESPONSE_BYTES = 12 * 1024;
 
-// ISRG Root X1 from https://letsencrypt.org/certs/isrgrootx1.pem.
-// The owned endpoint serves Let's Encrypt's default compatibility chain to
-// this trust anchor. Pairing never falls back to setInsecure().
-constexpr char ISRG_ROOT_X1[] = R"PEM(-----BEGIN CERTIFICATE-----
-MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
-TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
-cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
-WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
-ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
-MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
-h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
-0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
-A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
-T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
-B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
-B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
-KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
-OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
-jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
-qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
-rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
-HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
-hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
-ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
-3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
-NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
-ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
-TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
-jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
-oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
-4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
-mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
-emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
+// ISRG Root YE from https://letsencrypt.org/certs/gen-y/root-ye.pem.
+// The owned endpoint currently serves Let's Encrypt's YE2 chain. Trusting Root
+// YE lets wolfSSL stop before the longer X2/X1 compatibility path.
+constexpr char ISRG_ROOT_YE[] = R"PEM(-----BEGIN CERTIFICATE-----
+MIIB2TCCAWCgAwIBAgIRAKQCa6LvbHwg1AR+XmWmk4AwCgYIKoZIzj0EAwMwLjEL
+MAkGA1UEBhMCVVMxDTALBgNVBAoTBElTUkcxEDAOBgNVBAMTB1Jvb3QgWUUwHhcN
+MjUwOTAzMDAwMDAwWhcNNDUwOTAyMjM1OTU5WjAuMQswCQYDVQQGEwJVUzENMAsG
+A1UEChMESVNSRzEQMA4GA1UEAxMHUm9vdCBZRTB2MBAGByqGSM49AgEGBSuBBAAi
+A2IABDwS/6vhrcVqcbBo+wgdI3fwn9x7DNJJOY/lTOti0vkwuRN87RhEhTH17E7X
+yFjWsPYhIPt/wzOqxTd2b+4ZJNy9ID04YywF9U5zasDVyGSNErVNtz8uSGh5izW8
+7j77GaNCMEAwDgYDVR0PAQH/BAQDAgEGMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0O
+BBYEFKPIJlqOoUzQNWP8myPIOq5W809WMAoGCCqGSM49BAMDA2cAMGQCMHhMr8N9
+LdL1VQKs9BdV81r76eXRB6mtjuNjzk6/lBsPNToWLTDzGYgtQKO1jl63uAIwGV7m
+onyF377c+MM1oqVNs17sgu7F9YKZwgLmVbeOMDbKAXHtKMDLbiGllCcs8f47
 -----END CERTIFICATE-----
 )PEM";
 
@@ -80,36 +63,132 @@ std::string externalId() {
   return value.data();
 }
 
+// One-line triage for when NEITHER SNTP NOR the HTTP Date could set the clock.
+// Reports the DHCP lease plus a raw-IP TCP probe that needs no DNS at all,
+// which splits "no lease" from "DNS broken but internet up" from "no egress".
+// The name-resolution side of the story now comes, better, from
+// netboot::Candidates::detail.
+std::string clockTriage() {
+  std::string detail = "ip:" + std::string(WiFi.localIP().toString().c_str());
+  detail += " gw:" + std::string(WiFi.gatewayIP().toString().c_str());
+  detail += " d:" + std::string(WiFi.dnsIP(0).toString().c_str());
+  WiFiClient rawProbe;
+  detail += rawProbe.connect(IPAddress(1, 1, 1, 1), 443, 4000) ? " raw443:ok" : " raw443:fail";
+  rawProbe.stop();
+  return detail;
+}
+
+// With no reachable UART in the field, the only way to read WHY a pairing run
+// died is the credential file on the SD card (/.crosspoint/toto.json,
+// lastError). One failed run is one or two sub-kilobyte writes; never call this
+// from a fast poll loop.
+void persistFailure() {
+  std::string detail = PairingClient::lastErrorDetail;
+  if (detail.empty() && PairingClient::lastHttpCode > 0) {
+    detail = "http " + std::to_string(PairingClient::lastHttpCode);
+  }
+  if (detail.empty()) return;
+  TOTO_CREDENTIALS.setLastError(detail);
+  TOTO_CREDENTIALS.saveToFile();
+}
+
+void persistFailure(const char* detail) {
+  PairingClient::lastErrorDetail = detail;
+  persistFailure();
+}
+
 int postJson(const std::string& path, const std::string& body, std::string& response) {
+  netboot::WifiFullPowerScope wifiFullPower;
+  PairingClient::lastErrorDetail.clear();
   if (insufficientHeap()) return -3;
-  if (!ensureTrustedClock()) return -5;
-  const std::string& baseUrl = TOTO_CREDENTIALS.getBaseUrl();
-  if (baseUrl.rfind("https://", 0) != 0) return -4;
 
-  freeink::SecureHttpClient http;
-  http.setCACert(rootCertificate());
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setReuse(false);
-  http.setUserAgent(std::string("CrossPoint-Toto/") + CROSSPOINT_VERSION);
-  if (!http.begin(baseUrl + path)) return -1;
-  http.addHeader("Accept", "application/json");
-  http.addHeader("Content-Type", "application/json");
+  // The URL is validated BEFORE the clock: the HTTP Date bootstrap needs the
+  // host both to resolve it and for the Host header.
+  const std::string baseUrl = TOTO_CREDENTIALS.getBaseUrl();
+  if (baseUrl.rfind("https://", 0) != 0) {
+    PairingClient::lastErrorDetail = "badurl:" + baseUrl.substr(0, 24);
+    return -4;
+  }
+  const std::string host = netboot::hostFromBaseUrl(baseUrl);
+  if (host.empty()) {
+    PairingClient::lastErrorDetail = "badurl:host";
+    return -4;
+  }
 
-  response.clear();
-  response.reserve(2048);
-  const int status = http.sendRequest("POST", reinterpret_cast<const uint8_t*>(body.data()), body.size(),
-                                      [&response](const uint8_t* data, size_t size) {
-                                        if (response.size() + size > MAX_RESPONSE_BYTES) return false;
-                                        response.append(reinterpret_cast<const char*>(data), size);
-                                        return true;
-                                      });
-  const bool complete = http.responseComplete() && !http.callbackAborted();
-  http.end();
-  return complete ? status : -2;
+  const netboot::Candidates candidates = netboot::resolveServer(host.c_str());
+
+  std::string clockDetail;
+  if (!ensureTrustedClock(&clockDetail)) {
+    PairingClient::lastErrorDetail = "clock " + clockTriage() + " " + clockDetail;
+    return -5;
+  }
+  if (candidates.count == 0) {
+    PairingClient::lastErrorDetail = "resolve:none " + candidates.detail;
+    return -1;
+  }
+
+  // Candidates are tried in order. The next one is only worth a retry when the
+  // failure was at TCP level (dead candidate: fails in <=3 s). A TLS failure
+  // means there IS a TLS server on the other side: switching IP fixes nothing
+  // and would cost another 15 s handshake.
+  int status = -1;
+  for (uint8_t attempt = 0; attempt < candidates.count && attempt < 3; ++attempt) {
+    freeink::SecureHttpClient http;
+    http.setCACert(rootCertificate());
+    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.setReuse(false);
+    http.setUserAgent(std::string("CrossPoint-Toto/") + CROSSPOINT_VERSION);
+    if (!http.begin(baseUrl + path)) {
+      PairingClient::lastErrorDetail = "http_begin";
+      return -1;
+    }
+    http.setServerAddress(candidates.ip[attempt]);  // begin() FIRST, pin AFTER
+    http.addHeader("Accept", "application/json");
+    http.addHeader("Content-Type", "application/json");
+
+    response.clear();
+    response.reserve(2048);
+    status = http.sendRequest("POST", reinterpret_cast<const uint8_t*>(body.data()), body.size(),
+                              [&response](const uint8_t* data, size_t size) {
+                                if (response.size() + size > MAX_RESPONSE_BYTES) return false;
+                                response.append(reinterpret_cast<const char*>(data), size);
+                                return true;
+                              });
+    const bool complete = http.responseComplete() && !http.callbackAborted();
+    const bool aborted = http.callbackAborted();
+    const std::string transportDetail = http.lastErrorDetail();
+    http.end();
+
+    if (status > 0) {
+      if (!complete) {
+        PairingClient::lastErrorDetail = aborted ? "resp_too_big" : "resp_incomplete";
+        return -2;
+      }
+      // That candidate works: cache it for the next boot.
+      netboot::rememberServerIp(host.c_str(), candidates.ip[attempt]);
+      return status;
+    }
+
+    PairingClient::lastErrorDetail = transportDetail.empty() ? ("http:" + std::to_string(status)) : transportDetail;
+    // A dead candidate (TCP/DNS) justifies a retry, and so does a certificate
+    // name mismatch (wolfSSL DOMAIN_NAME_MISMATCH, -322): that is the exact
+    // signature of dialing a WRONG address that still runs a TLS server --
+    // e.g. a DNS answer poisoned by a captive portal -- and it fails fast,
+    // right after the peer's certificate arrives. Other TLS failures mean the
+    // right server is unhappy; switching IP fixes nothing there.
+    if (transportDetail.rfind("tcp", 0) != 0 && transportDetail.rfind("dns", 0) != 0 &&
+        transportDetail.rfind("tls:-322", 0) != 0) {
+      break;
+    }
+    PairingClient::lastErrorDetail += " try" + std::to_string(attempt + 1);
+  }
+  PairingClient::lastErrorDetail += " " + candidates.detail;
+  return status > 0 ? -2 : -1;
 }
 
 PairingClient::Result transportResult(int status) {
   PairingClient::lastHttpCode = status > 0 ? status : 0;
+  persistFailure();
   if (status == -3) return PairingClient::Result::LOW_MEMORY;
   if (status == -5) return PairingClient::Result::CLOCK_ERROR;
   if (status <= 0) return PairingClient::Result::NETWORK_ERROR;
@@ -119,9 +198,10 @@ PairingClient::Result transportResult(int status) {
 
 }  // namespace
 
-const char* rootCertificate() { return ISRG_ROOT_X1; }
+const char* rootCertificate() { return ISRG_ROOT_YE; }
 
 int PairingClient::lastHttpCode = 0;
+std::string PairingClient::lastErrorDetail;
 
 PairingClient::Result PairingClient::request(const char* deviceName) {
   JsonDocument request;
@@ -153,14 +233,20 @@ PairingClient::Result PairingClient::request(const char* deviceName) {
   if (status != 201) return transportResult(status);
 
   JsonDocument result;
-  if (deserializeJson(result, response)) return Result::INVALID_RESPONSE;
+  if (deserializeJson(result, response)) {
+    persistFailure("bad_json");
+    return Result::INVALID_RESPONSE;
+  }
   const std::string requestId = result["request_id"] | "";
   const std::string userCode = result["user_code"] | "";
   std::string verificationUrl = result["verification_url"] | "";
   if (!verificationUrl.empty() && verificationUrl.front() == '/') {
     verificationUrl = TOTO_CREDENTIALS.getBaseUrl() + verificationUrl;
   }
-  if (requestId.empty() || userCode.empty() || verificationUrl.empty()) return Result::INVALID_RESPONSE;
+  if (requestId.empty() || userCode.empty() || verificationUrl.empty()) {
+    persistFailure("bad_fields");
+    return Result::INVALID_RESPONSE;
+  }
 
   TOTO_CREDENTIALS.setPairing(requestId, nonce, userCode, verificationUrl, 0, result["interval"] | 5U);
   if (!TOTO_CREDENTIALS.saveToFile()) return Result::PERSISTENCE_ERROR;
@@ -181,7 +267,10 @@ PairingClient::Result PairingClient::pollAndClaim() {
   lastHttpCode = status > 0 ? status : 0;
   if (status != 200) return transportResult(status);
   JsonDocument statusDoc;
-  if (deserializeJson(statusDoc, response)) return Result::INVALID_RESPONSE;
+  if (deserializeJson(statusDoc, response)) {
+    persistFailure("bad_json");
+    return Result::INVALID_RESPONSE;
+  }
   const std::string pairingStatus = statusDoc["status"] | "";
   if (pairingStatus == "pending") return Result::PENDING;
   if (pairingStatus == "rejected" || pairingStatus == "expired") {
@@ -189,17 +278,26 @@ PairingClient::Result PairingClient::pollAndClaim() {
     if (!TOTO_CREDENTIALS.saveToFile()) return Result::PERSISTENCE_ERROR;
     return pairingStatus == "rejected" ? Result::REJECTED : Result::EXPIRED;
   }
-  if (pairingStatus != "approved") return Result::INVALID_RESPONSE;
+  if (pairingStatus != "approved") {
+    persistFailure("bad_fields");
+    return Result::INVALID_RESPONSE;
+  }
 
   response.clear();
   status = postJson("/api/devices/pairing/claim", body, response);
   lastHttpCode = status > 0 ? status : 0;
   if (status != 200) return transportResult(status);
   JsonDocument claim;
-  if (deserializeJson(claim, response)) return Result::INVALID_RESPONSE;
+  if (deserializeJson(claim, response)) {
+    persistFailure("bad_json");
+    return Result::INVALID_RESPONSE;
+  }
   const std::string deviceId = claim["credential"]["username"] | "";
   const std::string token = claim["credential"]["token"] | "";
-  if (deviceId.empty() || token.size() < 32) return Result::INVALID_RESPONSE;
+  if (deviceId.empty() || token.size() < 32) {
+    persistFailure("bad_fields");
+    return Result::INVALID_RESPONSE;
+  }
 
   TOTO_CREDENTIALS.setCredential(deviceId, token);
   if (!TOTO_CREDENTIALS.saveToFile()) return Result::PERSISTENCE_ERROR;
