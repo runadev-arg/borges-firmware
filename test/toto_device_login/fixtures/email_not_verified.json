@@ -1,0 +1,25 @@
+{
+  "name": "email_not_verified",
+  "description": "La cuenta existe y la contraseña es correcta, pero su email sigue sin confirmar.",
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/v1/login",
+    "body": {
+      "username": "sinconfirmar",
+      "password": "********",
+      "platform": "kobo",
+      "external_id": "kobo-N3-1a2b3c4d"
+    }
+  },
+  "response": {
+    "status": 403,
+    "body": {
+      "error": {
+        "code": "email_not_verified",
+        "message": "Confirmá tu email antes de vincular un lector.",
+        "retryable": false
+      },
+      "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  }
+}

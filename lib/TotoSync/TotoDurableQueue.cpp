@@ -317,6 +317,39 @@ size_t DurableQueue::inboxDepth() const {
   return count;
 }
 
+bool DurableQueue::purgeAccountState() {
+  if (!initialized && !begin()) return false;
+
+  // listFiles() is capped at MAX_QUEUE_SCAN, so a deep queue needs more than
+  // one pass; the pass budget keeps a directory that refuses deletion from
+  // looping forever.
+  constexpr int MAX_PASSES = 8;
+  for (const char* directory : {OUTBOX_DIR, INBOX_DIR}) {
+    for (int pass = 0; pass < MAX_PASSES; ++pass) {
+      const std::vector<String> entries = Storage.listFiles(directory, MAX_QUEUE_SCAN);
+      if (entries.empty()) break;
+      bool removedAny = false;
+      for (const String& filename : entries) {
+        removedAny = Storage.remove(joinPath(directory, filename).c_str()) || removedAny;
+      }
+      if (!removedAny) {
+        LOG_ERR("TOTO", "Could not clear %s while changing account", directory);
+        return false;
+      }
+    }
+    if (!Storage.listFiles(directory, 1).empty()) {
+      LOG_ERR("TOTO", "Queue directory %s still holds data after purge", directory);
+      return false;
+    }
+  }
+
+  state.nextSequence = 1;
+  state.appliedCursor = 0;
+  if (!saveCheckpoint()) return false;
+  LOG_INF("TOTO", "Sync state cleared for account change");
+  return true;
+}
+
 bool DurableQueue::commitAppliedCursor(uint64_t cursor) {
   if (cursor < state.appliedCursor) return false;
   if (cursor == state.appliedCursor) return true;

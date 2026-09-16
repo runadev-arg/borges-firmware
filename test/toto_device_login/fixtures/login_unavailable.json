@@ -1,0 +1,26 @@
+{
+  "name": "login_unavailable",
+  "description": "El servidor o la base no están disponibles. Backoff exponencial con jitter.",
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/v1/login",
+    "body": {
+      "username": "lectora",
+      "password": "********",
+      "platform": "kobo",
+      "external_id": "kobo-N3-9f2c41d8"
+    }
+  },
+  "response": {
+    "status": 503,
+    "headers": { "Retry-After": "30" },
+    "body": {
+      "error": {
+        "code": "login_unavailable",
+        "message": "El login de lector no está disponible en este momento.",
+        "retryable": true
+      },
+      "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  }
+}

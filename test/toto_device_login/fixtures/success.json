@@ -1,0 +1,75 @@
+{
+  "name": "success",
+  "description": "Login válido: la cuenta emite una credencial individual para este lector.",
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/v1/login",
+    "body": {
+      "username": "lectora",
+      "password": "********",
+      "platform": "kobo",
+      "external_id": "kobo-N3-9f2c41d8",
+      "device_name": "Kobo Clara del living",
+      "firmware_version": "4.38.21908",
+      "client_version": "toto-koreader/2.3.0",
+      "protocol_version": 2,
+      "capabilities": { "annotations": true, "progress": true }
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "protocol_version": 1,
+      "account": {
+        "username": "lectora",
+        "email_verified": true
+      },
+      "device": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "name": "Kobo Clara del living",
+        "platform": "kobo",
+        "external_id": "kobo-N3-9f2c41d8",
+        "status": "active",
+        "protocol_version": 2,
+        "capabilities": { "annotations": true, "progress": true },
+        "created_at": "2026-09-15T09:00:00.000Z"
+      },
+      "credential": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "token": "toto_XXXXXXXX_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "token_prefix": "toto_XXXXXXXX",
+        "username": "11111111-1111-4111-8111-111111111111",
+        "scopes": [
+          "device:self",
+          "kosync",
+          "library:read",
+          "plugin:update",
+          "sync:legacy",
+          "sync:v2"
+        ],
+        "expires_at": "2027-03-14T09:00:00.000Z",
+        "renew_after": "2027-02-28T09:00:00.000Z",
+        "created_at": "2026-09-15T09:00:00.000Z"
+      },
+      "legacy": {
+        "kosync": {
+          "username": "11111111-1111-4111-8111-111111111111",
+          "userkey": "ffffffffffffffffffffffffffffffff"
+        },
+        "opds": {
+          "username": "11111111-1111-4111-8111-111111111111",
+          "password": "toto_XXXXXXXX_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+        }
+      },
+      "endpoints": {
+        "self": "/api/devices/self",
+        "rotate": "/api/devices/self/credentials/rotate",
+        "health": "/api/devices/self/health",
+        "sync_v2": "/api/sync/v2",
+        "kosync": "/api/kosync",
+        "opds": "/api/opds"
+      },
+      "superseded_credential_count": 0
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "tls_required",
+  "description": "Se intentó el login por HTTP en un servicio público. La contraseña no viaja en claro.",
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/v1/login",
+    "body": {
+      "username": "lectora",
+      "password": "********",
+      "platform": "kobo",
+      "external_id": "kobo-N3-9f2c41d8"
+    }
+  },
+  "response": {
+    "status": 403,
+    "body": {
+      "error": {
+        "code": "tls_required",
+        "message": "El login de lector sólo se acepta sobre HTTPS.",
+        "retryable": false
+      },
+      "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  }
+}

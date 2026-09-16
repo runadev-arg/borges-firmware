@@ -79,6 +79,11 @@ class DurableQueue {
   bool resolveInbox(uint64_t serverSequence);
   size_t depth() const;
   size_t inboxDepth() const;
+  // Drops every queued event, in and out, and rewinds the client sequence.
+  // Called when the reader changes account: events raised for the old account
+  // must never reach the new one. The clock anchor survives -- it is a time
+  // reference, not account data.
+  bool purgeAccountState();
 
   const Checkpoint& checkpoint() const { return state; }
   uint32_t getBootId() const { return runtimeBootId; }

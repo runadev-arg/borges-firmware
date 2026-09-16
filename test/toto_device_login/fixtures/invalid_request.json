@@ -1,0 +1,24 @@
+{
+  "name": "invalid_request",
+  "description": "Falta external_id, que es lo que hace que reintentar no fabrique lectores fantasma.",
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/v1/login",
+    "body": {
+      "username": "lectora",
+      "password": "********",
+      "platform": "kobo"
+    }
+  },
+  "response": {
+    "status": 422,
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "external_id es obligatorio: 1 a 128 caracteres [A-Za-z0-9._:-] estables entre arranques.",
+        "retryable": false
+      },
+      "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  }
+}

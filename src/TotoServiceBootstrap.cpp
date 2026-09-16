@@ -1,6 +1,8 @@
 #include <KOReaderCredentialStore.h>
 #include <Logging.h>
 
+#include <string>
+
 #include "OpdsServerStore.h"
 #include "TotoCredentialStore.h"
 
@@ -43,6 +45,29 @@ bool bootstrapCrossPointServices() {
   }
   LOG_INF("TOTO", "Paired services configured for device %s", TOTO_CREDENTIALS.getDeviceId().c_str());
   return true;
+}
+
+void teardownCrossPointServices() {
+  // The catalogue entry and the KOSync credentials both carry the old
+  // account's device token. Leaving either behind would let a signed-out
+  // reader keep listing and syncing somebody else's library.
+  for (size_t index = OPDS_STORE.getCount(); index > 0; --index) {
+    const OpdsServer* current = OPDS_STORE.getServer(index - 1);
+    if (current == nullptr) continue;
+    if (current->name == OPDS_NAME || current->url.rfind(TOTO_CREDENTIALS.getBaseUrl(), 0) == 0) {
+      OPDS_STORE.removeServer(index - 1);
+    }
+  }
+  OPDS_STORE.saveToFile();
+
+  const std::string& deviceId = TOTO_CREDENTIALS.getDeviceId();
+  const bool ownsKoreaderConfig = (!deviceId.empty() && KOREADER_STORE.getUsername() == deviceId) ||
+                                  KOREADER_STORE.getServerUrl().rfind(TOTO_CREDENTIALS.getBaseUrl(), 0) == 0;
+  if (ownsKoreaderConfig) {
+    KOREADER_STORE.clearCredentials();
+    KOREADER_STORE.setServerUrl("");
+    KOREADER_STORE.saveToFile();
+  }
 }
 
 }  // namespace toto

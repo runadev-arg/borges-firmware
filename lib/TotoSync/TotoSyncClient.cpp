@@ -1,8 +1,8 @@
 #include "TotoSyncClient.h"
 
+#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <Logging.h>
-#include <SecureHttpClient.h>
 
 #include <charconv>
 #include <string>
@@ -10,6 +10,7 @@
 
 #include "TotoCredentialStore.h"
 #include "TotoDurableQueue.h"
+#include "TotoHttp.h"
 #include "TotoTrust.h"
 
 #ifndef CROSSPOINT_VERSION
@@ -74,28 +75,17 @@ std::string pullBody(uint64_t cursor, size_t queueDepth) {
 }
 
 int post(const std::string& path, const std::string& body, std::string& response) {
-  if (TOTO_CREDENTIALS.getBaseUrl().rfind("https://", 0) != 0) return -3;
-  freeink::SecureHttpClient http;
-  http.setCACert(rootCertificate());
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setReuse(false);
-  http.setUserAgent(std::string("CrossPoint-Toto/") + CROSSPOINT_VERSION);
-  if (!http.begin(TOTO_CREDENTIALS.getBaseUrl() + path)) return -1;
-  http.addHeader("Accept", "application/json");
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Authorization", "Bearer " + TOTO_CREDENTIALS.getToken());
-
-  response.clear();
-  response.reserve(4096);
-  const int code = http.sendRequest("POST", reinterpret_cast<const uint8_t*>(body.data()), body.size(),
-                                    [&response](const uint8_t* data, size_t size) {
-                                      if (response.size() + size > MAX_RESPONSE_BYTES) return false;
-                                      response.append(reinterpret_cast<const char*>(data), size);
-                                      return true;
-                                    });
-  const bool complete = http.responseComplete() && !http.callbackAborted();
-  http.end();
-  return complete ? code : -2;
+  HttpRequest request;
+  request.path = path.c_str();
+  request.body = &body;
+  request.bearerToken = TOTO_CREDENTIALS.getToken().c_str();
+  request.timeoutMs = HTTP_TIMEOUT_MS;
+  request.maxResponseBytes = MAX_RESPONSE_BYTES;
+  request.reserveBytes = 4096;
+  // syncOnce() already cleared both gates before assembling the batch.
+  request.requireHeadroom = false;
+  request.requireTrustedClock = false;
+  return postJson(request, response);
 }
 
 bool shouldDefer(JsonObjectConst event) {

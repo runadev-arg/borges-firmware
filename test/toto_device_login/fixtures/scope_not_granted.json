@@ -1,0 +1,26 @@
+{
+  "name": "scope_not_granted",
+  "description": "El lector pidió un permiso que la cuenta no otorga.",
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/v1/login",
+    "body": {
+      "username": "lectora",
+      "password": "********",
+      "platform": "kobo",
+      "external_id": "kobo-N3-9f2c41d8",
+      "scopes": ["sync:v2", "admin:everything"]
+    }
+  },
+  "response": {
+    "status": 403,
+    "body": {
+      "error": {
+        "code": "scope_not_granted",
+        "message": "La cuenta no otorga alguno de los permisos pedidos.",
+        "retryable": false
+      },
+      "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  }
+}

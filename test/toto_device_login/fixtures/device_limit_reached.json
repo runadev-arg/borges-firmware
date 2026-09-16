@@ -1,0 +1,26 @@
+{
+  "name": "device_limit_reached",
+  "description": "La cuenta llegó al tope de lectores vivos. Hay que desvincular uno desde la web.",
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/v1/login",
+    "body": {
+      "username": "lectora",
+      "password": "********",
+      "platform": "kobo",
+      "external_id": "kobo-N3-aaaaaaaa"
+    }
+  },
+  "response": {
+    "status": 409,
+    "body": {
+      "error": {
+        "code": "device_limit_reached",
+        "message": "La cuenta llegó al máximo de lectores vinculados. Desvinculá uno desde la web.",
+        "retryable": false,
+        "details": { "max_devices": 20 }
+      },
+      "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  }
+}

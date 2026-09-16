@@ -1,8 +1,8 @@
 #include "TotoPairingClient.h"
 
+#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <Logging.h>
-#include <SecureHttpClient.h>
 #include <base64.h>
 #include <esp_random.h>
 
@@ -11,7 +11,8 @@
 #include <string>
 
 #include "TotoCredentialStore.h"
-#include "TotoTrust.h"
+#include "TotoDeviceLogin.h"
+#include "TotoHttp.h"
 
 #ifndef CROSSPOINT_VERSION
 #define CROSSPOINT_VERSION "development"
@@ -20,48 +21,8 @@
 namespace toto {
 namespace {
 
-constexpr uint32_t MIN_FREE_FOR_TLS = 50000;
-constexpr uint32_t MIN_BLOCK_FOR_TLS = 20000;
 constexpr uint32_t HTTP_TIMEOUT_MS = 15000;
 constexpr size_t MAX_RESPONSE_BYTES = 12 * 1024;
-
-// ISRG Root X1 from https://letsencrypt.org/certs/isrgrootx1.pem.
-// The owned endpoint serves Let's Encrypt's default compatibility chain to
-// this trust anchor. Pairing never falls back to setInsecure().
-constexpr char ISRG_ROOT_X1[] = R"PEM(-----BEGIN CERTIFICATE-----
-MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
-TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
-cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
-WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
-ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
-MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
-h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
-0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
-A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
-T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
-B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
-B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
-KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
-OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
-jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
-qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
-rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
-HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
-hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
-ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
-3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
-NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
-ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
-TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
-jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
-oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
-4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
-mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
-emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
------END CERTIFICATE-----
-)PEM";
-
-bool insufficientHeap() { return ESP.getFreeHeap() < MIN_FREE_FOR_TLS || ESP.getMaxAllocHeap() < MIN_BLOCK_FOR_TLS; }
 
 std::string base64UrlNonce() {
   std::array<uint8_t, 32> bytes{};
@@ -73,53 +34,25 @@ std::string base64UrlNonce() {
   return encoded.c_str();
 }
 
-std::string externalId() {
-  std::array<char, 32> value{};
-  std::snprintf(value.data(), value.size(), "x4-%012llx",
-                static_cast<unsigned long long>(ESP.getEfuseMac() & 0xFFFFFFFFFFFFULL));
-  return value.data();
-}
-
-int postJson(const std::string& path, const std::string& body, std::string& response) {
-  if (insufficientHeap()) return -3;
-  if (!ensureTrustedClock()) return -5;
-  const std::string& baseUrl = TOTO_CREDENTIALS.getBaseUrl();
-  if (baseUrl.rfind("https://", 0) != 0) return -4;
-
-  freeink::SecureHttpClient http;
-  http.setCACert(rootCertificate());
-  http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setReuse(false);
-  http.setUserAgent(std::string("CrossPoint-Toto/") + CROSSPOINT_VERSION);
-  if (!http.begin(baseUrl + path)) return -1;
-  http.addHeader("Accept", "application/json");
-  http.addHeader("Content-Type", "application/json");
-
-  response.clear();
-  response.reserve(2048);
-  const int status = http.sendRequest("POST", reinterpret_cast<const uint8_t*>(body.data()), body.size(),
-                                      [&response](const uint8_t* data, size_t size) {
-                                        if (response.size() + size > MAX_RESPONSE_BYTES) return false;
-                                        response.append(reinterpret_cast<const char*>(data), size);
-                                        return true;
-                                      });
-  const bool complete = http.responseComplete() && !http.callbackAborted();
-  http.end();
-  return complete ? status : -2;
+int postJson(const char* path, const std::string& body, std::string& response) {
+  HttpRequest request;
+  request.path = path;
+  request.body = &body;
+  request.timeoutMs = HTTP_TIMEOUT_MS;
+  request.maxResponseBytes = MAX_RESPONSE_BYTES;
+  return toto::postJson(request, response);
 }
 
 PairingClient::Result transportResult(int status) {
   PairingClient::lastHttpCode = status > 0 ? status : 0;
-  if (status == -3) return PairingClient::Result::LOW_MEMORY;
-  if (status == -5) return PairingClient::Result::CLOCK_ERROR;
+  if (status == HTTP_LOW_MEMORY) return PairingClient::Result::LOW_MEMORY;
+  if (status == HTTP_CLOCK_ERROR) return PairingClient::Result::CLOCK_ERROR;
   if (status <= 0) return PairingClient::Result::NETWORK_ERROR;
   if (status >= 500 || status == 429) return PairingClient::Result::SERVER_ERROR;
   return PairingClient::Result::INVALID_RESPONSE;
 }
 
 }  // namespace
-
-const char* rootCertificate() { return ISRG_ROOT_X1; }
 
 int PairingClient::lastHttpCode = 0;
 
@@ -128,8 +61,8 @@ PairingClient::Result PairingClient::request(const char* deviceName) {
   const std::string nonce = base64UrlNonce();
   request["device_nonce"] = nonce;
   request["device_name"] = deviceName;
-  request["platform"] = "crosspoint-x4";
-  request["external_id"] = externalId();
+  request["platform"] = DEVICE_PLATFORM;
+  request["external_id"] = deviceExternalId(ESP.getEfuseMac());
   request["firmware_version"] = CROSSPOINT_VERSION;
   request["client_version"] = "toto-sync-v2";
   request["protocol_version"] = 2;

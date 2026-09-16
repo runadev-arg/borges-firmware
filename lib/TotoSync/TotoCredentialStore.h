@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <string>
 
+#include "TotoDeviceLogin.h"
+
 namespace toto {
 
 class CredentialStore : public PersistableStore<CredentialStore> {
@@ -13,6 +15,16 @@ class CredentialStore : public PersistableStore<CredentialStore> {
   std::string baseUrl = "https://highlights.runadev.com";
   std::string deviceId;
   std::string token;
+  // Display name of the signed-in account, empty when the reader arrived by
+  // code pairing. The account password is never a field here, on disk or in
+  // memory: it is spent on the login request and dropped.
+  std::string accountUsername;
+  // Comparison key for "is this the same account as last time". Login stores
+  // the folded username; code pairing stores a per-device sentinel, so a later
+  // sign-in still reads as a switch and nothing from the old account leaks.
+  std::string accountKey;
+  uint64_t tokenExpiresAt = 0;
+  uint64_t tokenRenewAfter = 0;
   std::string pairingRequestId;
   std::string pairingNonce;
   std::string pairingUserCode;
@@ -35,12 +47,20 @@ class CredentialStore : public PersistableStore<CredentialStore> {
                   uint64_t expiresAt, uint32_t intervalSeconds);
   void clearPairing();
   void setCredential(std::string id, std::string secret);
+  void setSession(const DeviceSession& session);
   void clearCredential();
+  SessionState state(uint64_t nowUnixSeconds) const {
+    return sessionState(nowUnixSeconds, tokenRenewAfter, tokenExpiresAt, !token.empty());
+  }
 
   const std::string& getBaseUrl() const { return baseUrl; }
   void setBaseUrl(std::string value);
   const std::string& getDeviceId() const { return deviceId; }
   const std::string& getToken() const { return token; }
+  const std::string& getAccountUsername() const { return accountUsername; }
+  const std::string& getAccountKey() const { return accountKey; }
+  uint64_t getTokenExpiresAt() const { return tokenExpiresAt; }
+  uint64_t getTokenRenewAfter() const { return tokenRenewAfter; }
   const std::string& getPairingRequestId() const { return pairingRequestId; }
   const std::string& getPairingNonce() const { return pairingNonce; }
   const std::string& getPairingUserCode() const { return pairingUserCode; }
@@ -52,6 +72,9 @@ class CredentialStore : public PersistableStore<CredentialStore> {
 };
 
 bool bootstrapCrossPointServices();
+// Undoes the bootstrap: drops the Toto catalogue entry and the KOSync
+// credentials so a signed-out reader cannot keep reaching the old account.
+void teardownCrossPointServices();
 
 }  // namespace toto
 

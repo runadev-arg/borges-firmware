@@ -1,0 +1,27 @@
+{
+  "name": "owner_not_accepted",
+  "description": "El lector mandó user_id. El dueño lo define la contraseña, así que el request se rechaza.",
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/v1/login",
+    "body": {
+      "username": "lectora",
+      "password": "********",
+      "platform": "kobo",
+      "external_id": "kobo-N3-9f2c41d8",
+      "user_id": "33333333-3333-4333-8333-333333333333"
+    }
+  },
+  "response": {
+    "status": 422,
+    "body": {
+      "error": {
+        "code": "owner_not_accepted",
+        "message": "El lector no elige la cuenta: la define la contraseña.",
+        "retryable": false,
+        "details": { "field": "user_id" }
+      },
+      "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  }
+}

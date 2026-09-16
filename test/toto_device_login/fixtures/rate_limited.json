@@ -1,0 +1,26 @@
+{
+  "name": "rate_limited",
+  "description": "Demasiados intentos por IP o por identidad. Respetar Retry-After.",
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/v1/login",
+    "body": {
+      "username": "lectora",
+      "password": "********",
+      "platform": "kobo",
+      "external_id": "kobo-N3-9f2c41d8"
+    }
+  },
+  "response": {
+    "status": 429,
+    "headers": { "Retry-After": "3600" },
+    "body": {
+      "error": {
+        "code": "rate_limited",
+        "message": "Too many requests",
+        "retryable": true
+      },
+      "request_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }
+  }
+}

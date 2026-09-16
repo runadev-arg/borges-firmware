@@ -8,7 +8,7 @@
 namespace toto {
 namespace {
 
-constexpr uint8_t CONFIG_VERSION = 1;
+constexpr uint8_t CONFIG_VERSION = 2;
 
 std::string decodeSecret(JsonVariantConst doc, const char* obfuscatedKey, const char* legacyKey, bool& needsResave) {
   bool ok = false;
@@ -32,6 +32,10 @@ void CredentialStore::toJson(JsonDocument& doc) const {
   doc["baseUrl"] = baseUrl;
   doc["deviceId"] = deviceId;
   doc["token_obf"] = obfuscation::obfuscateToBase64(token);
+  doc["accountUsername"] = accountUsername;
+  doc["accountKey"] = accountKey;
+  doc["tokenExpiresAt"] = tokenExpiresAt;
+  doc["tokenRenewAfter"] = tokenRenewAfter;
   doc["pairingRequestId"] = pairingRequestId;
   doc["pairingNonce_obf"] = obfuscation::obfuscateToBase64(pairingNonce);
   doc["pairingUserCode"] = pairingUserCode;
@@ -50,6 +54,17 @@ bool CredentialStore::fromJson(JsonVariantConst doc) {
   }
   deviceId = doc["deviceId"] | "";
   token = decodeSecret(doc, "token_obf", "token", needsResave);
+  accountUsername = doc["accountUsername"] | "";
+  accountKey = doc["accountKey"] | "";
+  // A file written before the account era holds a credential but no key.
+  // Adopting a device sentinel keeps the first sign-in classified as a switch,
+  // which is what purges whatever the previous account left behind.
+  if (accountKey.empty() && !deviceId.empty()) {
+    accountKey = "device:" + deviceId;
+    needsResave = true;
+  }
+  tokenExpiresAt = doc["tokenExpiresAt"] | static_cast<uint64_t>(0);
+  tokenRenewAfter = doc["tokenRenewAfter"] | static_cast<uint64_t>(0);
   pairingRequestId = doc["pairingRequestId"] | "";
   pairingNonce = decodeSecret(doc, "pairingNonce_obf", "pairingNonce", needsResave);
   pairingUserCode = doc["pairingUserCode"] | "";
@@ -86,6 +101,24 @@ void CredentialStore::clearPairing() {
 void CredentialStore::setCredential(std::string id, std::string secret) {
   deviceId = std::move(id);
   token = std::move(secret);
+  // Code pairing never learns which account approved it, so the key is tied to
+  // the device instead of to a name.
+  accountUsername.clear();
+  accountKey = "device:" + deviceId;
+  tokenExpiresAt = 0;
+  tokenRenewAfter = 0;
+  clearPairing();
+  lastError.clear();
+}
+
+void CredentialStore::setSession(const DeviceSession& session) {
+  deviceId = session.deviceId;
+  token = session.token;
+  accountUsername = session.accountUsername;
+  accountKey = accountFingerprint(session.accountUsername);
+  if (accountKey.empty()) accountKey = "device:" + deviceId;
+  tokenExpiresAt = session.expiresAt;
+  tokenRenewAfter = session.renewAfter;
   clearPairing();
   lastError.clear();
 }
@@ -93,6 +126,10 @@ void CredentialStore::setCredential(std::string id, std::string secret) {
 void CredentialStore::clearCredential() {
   deviceId.clear();
   token.clear();
+  accountUsername.clear();
+  accountKey.clear();
+  tokenExpiresAt = 0;
+  tokenRenewAfter = 0;
   lastError.clear();
 }
 
