@@ -101,3 +101,55 @@ published, an expiring credential is surfaced in the UI and refreshed by signing
 
 An unrecognised code is deliberately *not* fatal and *not* a success: it waits. `403` is never
 guessed from the status alone, because the contract puts three different causes behind it.
+
+## The screen a reader actually sees
+
+The Toto entry in Settings opens one list with five rows, and **each capability appears exactly
+once** — there is no second door that looks like a different feature:
+
+| Row | What it does |
+|---|---|
+| Account | Signs in when signed out; asks to confirm signing out when signed in |
+| Sync now | One exchange with the hub, and reports what was sent and received |
+| Library | Opens the account's catalogue in picker mode, ready to browse |
+| Status and help | Read-only: what is pending, when sync last worked, what to quote in a report |
+| Advanced | Diagnosis and recovery only |
+
+`Sync now` and `Library` are dimmed while signed out rather than hidden: a menu that changes shape
+is harder to learn than one with a greyed-out line.
+
+**Advanced** holds pairing by code (the door for readers that cannot keep a stable identifier),
+re-registering the services a sign-in sets up, and discarding a reading position that is waiting
+for an answer. It chooses and returns; `TotoSyncActivity` is the only screen that connects to
+Wi-Fi and spends the session, so a request can never be started from two places at once.
+
+A **reading position left by another device is a question, not a menu row.** It is asked as a
+confirmation when the screen opens and after any sync that pulls one. Backing out of the question
+decides nothing: the suggestion stays in the inbox, the status line keeps saying so, and Advanced
+still offers to drop it.
+
+The rules behind all of this — which row is live, which sentence the status line shows, how old the
+last sync is — live in `lib/TotoSync/TotoSyncMenu.{h,cpp}`, which has no Arduino, i18n or storage
+dependency and is covered by `test/toto_sync_menu` on the host. `src/activities/settings/
+TotoSyncText.*` is the only place that turns those decisions into `tr()` strings, so the two screens
+cannot drift into describing one state differently.
+
+### Last sync, and the report code
+
+`credential.lastSyncAt` is written in `SyncClient::syncOnce()` on a `200`, dated by the hub's
+`server_time` when it sends one and by the local clock otherwise. It is account-scoped: every
+credential transition resets it, so a new account never inherits the previous one's success.
+
+The report code is `<firmware version> / <device id>` and nothing else. The device id is the same
+non-secret identifier the OPDS catalogue uses as a username; the session token is not a parameter of
+`toto::reportCode()`, so no caller can leak it onto the screen.
+
+> The screen points at `<hub host>/help` for the report form itself. That path is the one
+> assumption here: the C13 form is owned upstream, and if it lands anywhere else only
+> `STR_TOTO_HELP_REPORT` has to change.
+
+### Translations
+
+New copy is written in English and Spanish. `gen_i18n.py` fills the other 29 languages from English
+and warns, which is the intended state until a translator gets to them — the protocol strings were
+not touched.

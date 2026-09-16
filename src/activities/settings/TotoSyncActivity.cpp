@@ -8,13 +8,18 @@
 #include <array>
 #include <cstdio>
 #include <ctime>
+#include <variant>
 
 #include "MappedInputManager.h"
+#include "OpdsServerListActivity.h"
 #include "TotoCredentialStore.h"
 #include "TotoDurableQueue.h"
 #include "TotoLoginClient.h"
 #include "TotoPairingClient.h"
+#include "TotoSyncAdvancedActivity.h"
 #include "TotoSyncClient.h"
+#include "TotoSyncStatusActivity.h"
+#include "TotoSyncText.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
@@ -22,7 +27,6 @@
 #include "fontIds.h"
 
 namespace {
-constexpr int MENU_ITEMS = 5;
 constexpr size_t MAX_CREDENTIAL_LENGTH = 128;
 
 uint64_t nowUnixSeconds() {
@@ -41,8 +45,9 @@ void TotoSyncActivity::onEnter() {
   Activity::onEnter();
   selectedIndex = 0;
   working = false;
+  offeredSuggestionId.reset();
   resultText.clear();
-  refreshDecision();
+  refreshSnapshot();
   requestUpdate();
 }
 
@@ -55,6 +60,13 @@ void TotoSyncActivity::loop() {
   if (working) {
     requestUpdateAndWait();
     performPendingAction();
+    return;
+  }
+  // A position left by another device is a question, not a menu row: asking it
+  // here is what keeps "accept" and "discard" from looking like two features.
+  if (progressDecision && offeredSuggestionId != progressDecision->suggestionId) {
+    offeredSuggestionId = progressDecision->suggestionId;
+    offerRemotePosition();
     return;
   }
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
@@ -71,7 +83,7 @@ void TotoSyncActivity::loop() {
   const int contentHeight =
       renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
   int touched = selectedIndex;
-  const auto touch = handleListTouch(touched, MENU_ITEMS, contentTop, contentHeight, false);
+  const auto touch = handleListTouch(touched, toto::MENU_ROW_COUNT, contentTop, contentHeight, false);
   if (touch != ListTouchResult::None) {
     selectedIndex = touched;
     if (touch == ListTouchResult::Activated) activate();
@@ -79,42 +91,120 @@ void TotoSyncActivity::loop() {
   }
 
   navigator.onNext([this] {
-    selectedIndex = (selectedIndex + 1) % MENU_ITEMS;
+    selectedIndex = (selectedIndex + 1) % toto::MENU_ROW_COUNT;
     requestUpdate();
   });
   navigator.onPrevious([this] {
-    selectedIndex = (selectedIndex + MENU_ITEMS - 1) % MENU_ITEMS;
+    selectedIndex = (selectedIndex + toto::MENU_ROW_COUNT - 1) % toto::MENU_ROW_COUNT;
     requestUpdate();
   });
 }
 
+void TotoSyncActivity::refreshSnapshot() {
+  progressDecision = TOTO_QUEUE.nextProgressDecision();
+  const uint64_t now = nowUnixSeconds();
+  snapshot = toto::SyncSnapshot{
+      .signedIn = TOTO_CREDENTIALS.paired(),
+      .pairingPending = TOTO_CREDENTIALS.pairingPending(),
+      .remotePositionWaiting = progressDecision.has_value(),
+      .outbox = TOTO_QUEUE.depth(),
+      .inbox = TOTO_QUEUE.inboxDepth(),
+      .lastSuccessAt = TOTO_CREDENTIALS.getLastSyncAt(),
+      .now = now,
+      .session = TOTO_CREDENTIALS.state(now),
+  };
+}
+
 void TotoSyncActivity::activate() {
-  if (selectedIndex == 0) {
-    if (TOTO_CREDENTIALS.paired()) {
-      startActivityForResult(
-          std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_TOTO_SIGN_OUT), accountLine()),
-          [this](const ActivityResult& result) {
-            if (result.isCancelled) return;
-            toto::LoginClient::signOut();
-            resultText = tr(STR_TOTO_SIGNED_OUT_DONE);
-            refreshDecision();
-            requestUpdate();
-          });
-      return;
-    }
-    askUsername();
-  } else if (selectedIndex == 1) {
-    ensureWifiThen(Action::PairOrClaim);
-  } else if (selectedIndex == 2 && TOTO_CREDENTIALS.paired()) {
-    ensureWifiThen(Action::Sync);
-  } else if (selectedIndex == 3 && progressDecision) {
-    ensureWifiThen(Action::AcceptProgress);
-  } else if (selectedIndex == 4 && progressDecision) {
-    ensureWifiThen(Action::DismissProgress);
-  } else {
+  const auto row = static_cast<toto::MenuRow>(selectedIndex);
+  if (!toto::rowEnabled(row, snapshot)) {
     resultText = tr(STR_TOTO_SIGNED_OUT);
     requestUpdate();
+    return;
   }
+  switch (row) {
+    case toto::MenuRow::Account:
+      openAccount();
+      return;
+    case toto::MenuRow::SyncNow:
+      ensureWifiThen(Action::Sync);
+      return;
+    case toto::MenuRow::Library:
+      openLibrary();
+      return;
+    case toto::MenuRow::StatusHelp:
+      openStatusAndHelp();
+      return;
+    case toto::MenuRow::Advanced:
+      openAdvanced();
+      return;
+  }
+}
+
+void TotoSyncActivity::openAccount() {
+  if (!snapshot.signedIn) {
+    askUsername();
+    return;
+  }
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_TOTO_SIGN_OUT), toto_ui::accountSentence()),
+      [this](const ActivityResult& result) {
+        if (result.isCancelled) return;
+        toto::LoginClient::signOut();
+        resultText = tr(STR_TOTO_SIGNED_OUT_DONE);
+        refreshSnapshot();
+        requestUpdate();
+      });
+}
+
+void TotoSyncActivity::openLibrary() {
+  // Picker mode: from here the reader wants to browse the books on the
+  // account, not to edit the catalogue entry the sign-in created.
+  startActivityForResult(std::make_unique<OpdsServerListActivity>(renderer, mappedInput, true),
+                         [this](const ActivityResult&) { refreshSnapshot(); });
+}
+
+void TotoSyncActivity::openStatusAndHelp() {
+  const double percentage = progressDecision ? progressDecision->percentage : 0.0;
+  startActivityForResult(std::make_unique<TotoSyncStatusActivity>(renderer, mappedInput, snapshot, percentage),
+                         [this](const ActivityResult&) { refreshSnapshot(); });
+}
+
+void TotoSyncActivity::openAdvanced() {
+  startActivityForResult(std::make_unique<TotoSyncAdvancedActivity>(renderer, mappedInput, snapshot),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) return;
+                           const auto* chosen = std::get_if<MenuResult>(&result.data);
+                           if (chosen == nullptr) return;
+                           switch (static_cast<toto::AdvancedRow>(chosen->action)) {
+                             case toto::AdvancedRow::PairWithCode:
+                               ensureWifiThen(Action::PairOrClaim);
+                               return;
+                             case toto::AdvancedRow::RepairServices:
+                               ensureWifiThen(Action::RepairServices);
+                               return;
+                             case toto::AdvancedRow::DiscardRemotePosition:
+                               ensureWifiThen(Action::DismissProgress);
+                               return;
+                           }
+                         });
+}
+
+void TotoSyncActivity::offerRemotePosition() {
+  std::array<char, 128> body{};
+  std::snprintf(body.data(), body.size(), tr(STR_TOTO_RESUME_BODY), progressDecision->percentage);
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_TOTO_RESUME_HEADING), body.data()),
+      [this](const ActivityResult& result) {
+        if (result.isCancelled) {
+          // Backing out decides nothing: the suggestion stays in the inbox and
+          // Advanced still offers to drop it.
+          resultText = tr(STR_TOTO_RESUME_LATER);
+          requestUpdate();
+          return;
+        }
+        ensureWifiThen(Action::AcceptProgress);
+      });
 }
 
 void TotoSyncActivity::askUsername() {
@@ -217,7 +307,7 @@ void TotoSyncActivity::applySession(bool discardPreviousAccount) {
   const bool committed = toto::LoginClient::commit(pendingSession, discardPreviousAccount);
   pendingSession = {};
   resultText = committed ? tr(STR_TOTO_SIGNIN_SUCCESS) : tr(STR_TOTO_FAILED);
-  refreshDecision();
+  refreshSnapshot();
 }
 
 void TotoSyncActivity::forgetPendingCredentials() {
@@ -226,12 +316,14 @@ void TotoSyncActivity::forgetPendingCredentials() {
 }
 
 void TotoSyncActivity::performPendingAction() {
-  if (pendingAction == Action::SignIn) {
-    performSignIn();
-  } else if (pendingAction == Action::PairOrClaim) {
-    if (TOTO_CREDENTIALS.paired()) {
+  switch (pendingAction) {
+    case Action::SignIn:
+      performSignIn();
+      break;
+    case Action::RepairServices:
       resultText = toto::bootstrapCrossPointServices() ? tr(STR_TOTO_PAIR_SUCCESS) : tr(STR_TOTO_FAILED);
-    } else {
+      break;
+    case Action::PairOrClaim: {
       const auto result =
           TOTO_CREDENTIALS.pairingPending() ? toto::PairingClient::pollAndClaim() : toto::PairingClient::request();
       if (result == toto::PairingClient::Result::OK || result == toto::PairingClient::Result::PENDING) {
@@ -241,45 +333,50 @@ void TotoSyncActivity::performPendingAction() {
       } else {
         resultText = std::string(tr(STR_TOTO_FAILED)) + ": " + toto::PairingClient::resultName(result);
       }
+      break;
     }
-  } else if (pendingAction == Action::Sync) {
-    const toto::SyncClient::Outcome outcome = toto::SyncClient::syncOnce();
-    if (outcome.result == toto::SyncClient::Result::OK) {
-      std::array<char, 96> text{};
-      std::snprintf(text.data(), text.size(), tr(STR_TOTO_SYNC_RESULT), static_cast<unsigned>(outcome.acknowledged),
-                    static_cast<unsigned>(outcome.pulled));
-      resultText = text.data();
-    } else if (outcome.result == toto::SyncClient::Result::AUTH_ERROR) {
-      // The hub refused the device credential: revoked from the web, or spent.
-      resultText = nextStepText(toto::NextStep::RELINK_FROM_WEB);
-    } else if (outcome.result == toto::SyncClient::Result::NETWORK_ERROR) {
-      resultText = nextStepText(toto::NextStep::RECONNECT);
-    } else {
-      resultText = std::string(tr(STR_TOTO_FAILED)) + ": " + toto::SyncClient::resultName(outcome.result);
-    }
-  } else if (progressDecision) {
-    const bool accept = pendingAction == Action::AcceptProgress;
-    const auto result = toto::SyncClient::resolveSuggestion(progressDecision->suggestionId, accept);
-    if (result == toto::SyncClient::Result::OK) {
-      const bool stored = accept ? TOTO_QUEUE.acceptProgress(*progressDecision)
-                                 : TOTO_QUEUE.resolveProgress(progressDecision->serverSequence);
-      if (!stored) {
-        resultText = tr(STR_TOTO_FAILED);
-      } else if (accept) {
-        resultText = tr(STR_TOTO_RESUME_ACCEPTED);
+    case Action::Sync: {
+      const toto::SyncClient::Outcome outcome = toto::SyncClient::syncOnce();
+      if (outcome.result == toto::SyncClient::Result::OK) {
+        std::array<char, 96> text{};
+        std::snprintf(text.data(), text.size(), tr(STR_TOTO_SYNC_RESULT), static_cast<unsigned>(outcome.acknowledged),
+                      static_cast<unsigned>(outcome.pulled));
+        resultText = text.data();
+      } else if (outcome.result == toto::SyncClient::Result::AUTH_ERROR) {
+        // The hub refused the device credential: revoked from the web, or spent.
+        resultText = nextStepText(toto::NextStep::RELINK_FROM_WEB);
+      } else if (outcome.result == toto::SyncClient::Result::NETWORK_ERROR) {
+        resultText = nextStepText(toto::NextStep::RECONNECT);
       } else {
-        resultText = tr(STR_TOTO_RESUME_DISMISSED);
+        resultText = std::string(tr(STR_TOTO_FAILED)) + ": " + toto::SyncClient::resultName(outcome.result);
       }
-    } else {
-      resultText = std::string(tr(STR_TOTO_FAILED)) + ": " + toto::SyncClient::resultName(result);
+      break;
+    }
+    case Action::AcceptProgress:
+    case Action::DismissProgress: {
+      if (!progressDecision) break;
+      const bool accept = pendingAction == Action::AcceptProgress;
+      const auto result = toto::SyncClient::resolveSuggestion(progressDecision->suggestionId, accept);
+      if (result == toto::SyncClient::Result::OK) {
+        const bool stored = accept ? TOTO_QUEUE.acceptProgress(*progressDecision)
+                                   : TOTO_QUEUE.resolveProgress(progressDecision->serverSequence);
+        if (!stored) {
+          resultText = tr(STR_TOTO_FAILED);
+        } else if (accept) {
+          resultText = tr(STR_TOTO_RESUME_ACCEPTED);
+        } else {
+          resultText = tr(STR_TOTO_RESUME_DISMISSED);
+        }
+      } else {
+        resultText = std::string(tr(STR_TOTO_FAILED)) + ": " + toto::SyncClient::resultName(result);
+      }
+      break;
     }
   }
-  refreshDecision();
+  refreshSnapshot();
   working = false;
   requestUpdate();
 }
-
-void TotoSyncActivity::refreshDecision() { progressDecision = TOTO_QUEUE.nextProgressDecision(); }
 
 const char* TotoSyncActivity::nextStepText(toto::NextStep step) {
   switch (step) {
@@ -304,26 +401,25 @@ const char* TotoSyncActivity::nextStepText(toto::NextStep step) {
   return tr(STR_TOTO_STEP_WAIT);
 }
 
-std::string TotoSyncActivity::accountLine() const {
-  if (!TOTO_CREDENTIALS.paired()) return tr(STR_TOTO_SIGNED_OUT);
-  const std::string& account = TOTO_CREDENTIALS.getAccountUsername();
-  // A reader that arrived through code pairing never learned the account name.
-  if (account.empty()) return tr(STR_TOTO_PAIRED);
-  std::array<char, 128> line{};
-  std::snprintf(line.data(), line.size(), tr(STR_TOTO_ACCOUNT), account.c_str());
-  return line.data();
+std::string TotoSyncActivity::rowTitle(int index) const {
+  switch (static_cast<toto::MenuRow>(index)) {
+    case toto::MenuRow::Account:
+      return snapshot.signedIn ? tr(STR_TOTO_MENU_ACCOUNT) : tr(STR_TOTO_SIGN_IN);
+    case toto::MenuRow::SyncNow:
+      return tr(STR_TOTO_SYNC_NOW);
+    case toto::MenuRow::Library:
+      return tr(STR_TOTO_MENU_LIBRARY);
+    case toto::MenuRow::StatusHelp:
+      return tr(STR_TOTO_MENU_STATUS);
+    case toto::MenuRow::Advanced:
+      break;
+  }
+  return tr(STR_TOTO_MENU_ADVANCED);
 }
 
 std::string TotoSyncActivity::statusLine() const {
   if (!resultText.empty()) return resultText;
-  switch (TOTO_CREDENTIALS.state(nowUnixSeconds())) {
-    case toto::SessionState::EXPIRED:
-      return tr(STR_TOTO_SESSION_EXPIRED);
-    case toto::SessionState::RENEW_DUE:
-      return tr(STR_TOTO_SESSION_RENEW);
-    default:
-      return {};
-  }
+  return toto_ui::statusSentence(snapshot);
 }
 
 void TotoSyncActivity::render(RenderLock&&) {
@@ -336,55 +432,27 @@ void TotoSyncActivity::render(RenderLock&&) {
 
   const int summaryTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const std::string account =
-      renderer.truncatedText(UI_12_FONT_ID, accountLine().c_str(), textWidth, EpdFontFamily::BOLD);
+      renderer.truncatedText(UI_12_FONT_ID, toto_ui::accountSentence().c_str(), textWidth, EpdFontFamily::BOLD);
   renderer.drawCenteredText(UI_12_FONT_ID, summaryTop + 14, account.c_str(), true, EpdFontFamily::BOLD);
 
-  if (TOTO_CREDENTIALS.pairingPending()) {
-    renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 40, tr(STR_TOTO_PAIR_WEB));
-  } else {
-    std::array<char, 96> queueLine{};
-    std::snprintf(queueLine.data(), queueLine.size(), tr(STR_TOTO_QUEUE_STATUS),
-                  static_cast<unsigned>(TOTO_QUEUE.depth()), static_cast<unsigned>(TOTO_QUEUE.inboxDepth()));
-    renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 40, queueLine.data());
-  }
+  const std::string status = renderer.truncatedText(UI_10_FONT_ID, statusLine().c_str(), textWidth);
+  renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 40, status.c_str());
 
-  if (TOTO_CREDENTIALS.pairingPending()) {
+  if (snapshot.pairingPending) {
     std::array<char, 96> codeLine{};
     std::snprintf(codeLine.data(), codeLine.size(), tr(STR_TOTO_PAIR_CODE),
                   TOTO_CREDENTIALS.getPairingUserCode().c_str());
     renderer.drawCenteredText(UI_12_FONT_ID, summaryTop + 64, codeLine.data(), true, EpdFontFamily::BOLD);
-  } else if (progressDecision && resultText.empty()) {
-    std::array<char, 96> resumeLine{};
-    std::snprintf(resumeLine.data(), resumeLine.size(), tr(STR_TOTO_RESUME_AT), progressDecision->percentage);
-    renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 64, resumeLine.data(), true, EpdFontFamily::BOLD);
-  } else if (const std::string status = statusLine(); !status.empty()) {
-    const std::string line = renderer.truncatedText(UI_10_FONT_ID, status.c_str(), textWidth);
-    renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 64, line.c_str());
+  } else {
+    renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 64, toto_ui::lastSyncSentence(snapshot).c_str());
   }
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + 86;
   const int contentHeight = height - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
   GUI.drawList(
-      renderer, Rect{0, contentTop, width, contentHeight}, MENU_ITEMS, selectedIndex,
-      [](int index) {
-        if (index == 0) {
-          return std::string(TOTO_CREDENTIALS.paired() ? tr(STR_TOTO_SIGN_OUT) : tr(STR_TOTO_SIGN_IN));
-        }
-        if (index == 1) {
-          if (TOTO_CREDENTIALS.paired()) return std::string(tr(STR_TOTO_REPAIR_SERVICES));
-          return std::string(TOTO_CREDENTIALS.pairingPending() ? tr(STR_TOTO_CHECK_PAIRING) : tr(STR_TOTO_PAIR_DEVICE));
-        }
-        if (index == 2) return std::string(tr(STR_TOTO_SYNC_NOW));
-        if (index == 3) return std::string(tr(STR_TOTO_ACCEPT_RESUME));
-        return std::string(tr(STR_TOTO_DISMISS_RESUME));
-      },
-      nullptr, nullptr,
-      [this](int index) {
-        if (index == 2 && !TOTO_CREDENTIALS.paired()) return std::string("[") + tr(STR_TOTO_SIGNED_OUT) + "]";
-        if (index >= 3 && !progressDecision) return std::string("[") + tr(STR_TOTO_NONE) + "]";
-        return std::string();
-      },
-      true);
+      renderer, Rect{0, contentTop, width, contentHeight}, toto::MENU_ROW_COUNT, selectedIndex,
+      [this](int index) { return rowTitle(index); }, nullptr, nullptr, nullptr, false,
+      [this](int index) { return !toto::rowEnabled(static_cast<toto::MenuRow>(index), snapshot); });
 
   if (working) {
     GUI.drawPopup(renderer, tr(STR_TOTO_WORKING));

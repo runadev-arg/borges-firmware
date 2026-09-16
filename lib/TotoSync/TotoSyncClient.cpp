@@ -5,6 +5,7 @@
 #include <Logging.h>
 
 #include <charconv>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -206,10 +207,18 @@ SyncClient::Outcome SyncClient::syncOnce() {
   outcome.cursor = *responseCursor;
   outcome.hasMore = pull["has_more"] | false;
 
+  uint64_t syncedAt = 0;
   if (const auto serverTime = parseRfc3339Utc(document["server_time"] | ""); serverTime.has_value()) {
     TOTO_QUEUE.setWallAnchor(*serverTime, millis());
+    syncedAt = *serverTime;
+  } else if (const std::time_t localNow = std::time(nullptr); localNow > 0) {
+    syncedAt = static_cast<uint64_t>(localNow);
   }
   outcome.queueDepth = TOTO_QUEUE.depth();
+  // Dated by the server whenever it says so. The reader's own clock is an NTP
+  // guess that survives a flat battery badly, and "last sync" is the line a
+  // reader uses to decide whether to trust the page in front of them.
+  if (syncedAt != 0) TOTO_CREDENTIALS.setLastSyncAt(syncedAt);
   if (outcome.rejected == 0) TOTO_CREDENTIALS.setLastError({});
   TOTO_CREDENTIALS.saveToFile();
   outcome.result = Result::OK;

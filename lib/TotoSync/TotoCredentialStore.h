@@ -25,6 +25,10 @@ class CredentialStore : public PersistableStore<CredentialStore> {
   std::string accountKey;
   uint64_t tokenExpiresAt = 0;
   uint64_t tokenRenewAfter = 0;
+  // Wall-clock second of the last sync the server accepted. Shown to the
+  // reader as "last sync", and account-scoped: it is reset with the
+  // credential, so a new account never inherits the old one's success.
+  uint64_t lastSyncAt = 0;
   std::string pairingRequestId;
   std::string pairingNonce;
   std::string pairingUserCode;
@@ -61,6 +65,8 @@ class CredentialStore : public PersistableStore<CredentialStore> {
   const std::string& getAccountKey() const { return accountKey; }
   uint64_t getTokenExpiresAt() const { return tokenExpiresAt; }
   uint64_t getTokenRenewAfter() const { return tokenRenewAfter; }
+  uint64_t getLastSyncAt() const { return lastSyncAt; }
+  void setLastSyncAt(uint64_t unixSeconds) { lastSyncAt = unixSeconds; }
   const std::string& getPairingRequestId() const { return pairingRequestId; }
   const std::string& getPairingNonce() const { return pairingNonce; }
   const std::string& getPairingUserCode() const { return pairingUserCode; }

@@ -36,6 +36,7 @@ void CredentialStore::toJson(JsonDocument& doc) const {
   doc["accountKey"] = accountKey;
   doc["tokenExpiresAt"] = tokenExpiresAt;
   doc["tokenRenewAfter"] = tokenRenewAfter;
+  doc["lastSyncAt"] = lastSyncAt;
   doc["pairingRequestId"] = pairingRequestId;
   doc["pairingNonce_obf"] = obfuscation::obfuscateToBase64(pairingNonce);
   doc["pairingUserCode"] = pairingUserCode;
@@ -65,6 +66,7 @@ bool CredentialStore::fromJson(JsonVariantConst doc) {
   }
   tokenExpiresAt = doc["tokenExpiresAt"] | static_cast<uint64_t>(0);
   tokenRenewAfter = doc["tokenRenewAfter"] | static_cast<uint64_t>(0);
+  lastSyncAt = doc["lastSyncAt"] | static_cast<uint64_t>(0);
   pairingRequestId = doc["pairingRequestId"] | "";
   pairingNonce = decodeSecret(doc, "pairingNonce_obf", "pairingNonce", needsResave);
   pairingUserCode = doc["pairingUserCode"] | "";
@@ -107,6 +109,7 @@ void CredentialStore::setCredential(std::string id, std::string secret) {
   accountKey = "device:" + deviceId;
   tokenExpiresAt = 0;
   tokenRenewAfter = 0;
+  lastSyncAt = 0;
   clearPairing();
   lastError.clear();
 }
@@ -119,6 +122,7 @@ void CredentialStore::setSession(const DeviceSession& session) {
   if (accountKey.empty()) accountKey = "device:" + deviceId;
   tokenExpiresAt = session.expiresAt;
   tokenRenewAfter = session.renewAfter;
+  lastSyncAt = 0;
   clearPairing();
   lastError.clear();
 }
@@ -130,6 +134,7 @@ void CredentialStore::clearCredential() {
   accountKey.clear();
   tokenExpiresAt = 0;
   tokenRenewAfter = 0;
+  lastSyncAt = 0;
   lastError.clear();
 }
 

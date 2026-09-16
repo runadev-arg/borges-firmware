@@ -5,9 +5,19 @@
 
 #include "TotoDeviceLogin.h"
 #include "TotoDurableQueue.h"
+#include "TotoSyncMenu.h"
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+/**
+ * The Toto account screen: one row per thing a reader wants to do -- account,
+ * sync, library, status and help -- with diagnosis and recovery folded into
+ * Advanced. Every capability appears exactly once.
+ *
+ * This is also the only screen that connects and spends the session. The
+ * Advanced screen chooses; this one acts, so a request cannot be started from
+ * two places at once.
+ */
 class TotoSyncActivity final : public Activity {
  public:
   explicit TotoSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -21,7 +31,7 @@ class TotoSyncActivity final : public Activity {
   bool preventAutoSleep() override { return working; }
 
  private:
-  enum class Action { SignIn, PairOrClaim, Sync, AcceptProgress, DismissProgress };
+  enum class Action { SignIn, Sync, RepairServices, PairOrClaim, AcceptProgress, DismissProgress };
 
   ButtonNavigator navigator;
   int selectedIndex = 0;
@@ -29,6 +39,11 @@ class TotoSyncActivity final : public Activity {
   Action pendingAction = Action::SignIn;
   std::string resultText;
   std::optional<toto::ProgressInboxItem> progressDecision;
+  toto::SyncSnapshot snapshot;
+  // The position already put to the reader this visit. Backing out of the
+  // question is not an answer, so the same one is never asked twice; a
+  // position that arrives later carries its own id and is asked on its own.
+  std::optional<std::string> offeredSuggestionId;
 
   // Held only between the keyboard screens and the request that spends them.
   // Both are wiped as soon as the login returns, and neither is ever written.
@@ -41,7 +56,13 @@ class TotoSyncActivity final : public Activity {
   void activate();
   void ensureWifiThen(Action action);
   void performPendingAction();
-  void refreshDecision();
+  void refreshSnapshot();
+
+  void openAccount();
+  void openLibrary();
+  void openStatusAndHelp();
+  void openAdvanced();
+  void offerRemotePosition();
 
   void askUsername();
   void askPassword();
@@ -50,7 +71,7 @@ class TotoSyncActivity final : public Activity {
   void confirmAccountSwitch(size_t pendingEvents);
   void forgetPendingCredentials();
 
-  std::string accountLine() const;
+  std::string rowTitle(int index) const;
   std::string statusLine() const;
   static const char* nextStepText(toto::NextStep step);
 };
