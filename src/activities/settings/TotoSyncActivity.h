@@ -31,7 +31,7 @@ class TotoSyncActivity final : public Activity {
   bool preventAutoSleep() override { return working; }
 
  private:
-  enum class Action { SignIn, Sync, RepairServices, PairOrClaim, AcceptProgress, DismissProgress };
+  enum class Action { SignIn, Sync, RepairServices, PairOrClaim, DeliverAnswers };
 
   ButtonNavigator navigator;
   int selectedIndex = 0;
@@ -40,10 +40,10 @@ class TotoSyncActivity final : public Activity {
   std::string resultText;
   std::optional<toto::ProgressInboxItem> progressDecision;
   toto::SyncSnapshot snapshot;
-  // The position already put to the reader this visit. Backing out of the
-  // question is not an answer, so the same one is never asked twice; a
-  // position that arrives later carries its own id and is asked on its own.
-  std::optional<std::string> offeredSuggestionId;
+  // A question is on screen right now. What was answered is remembered in the
+  // durable decision log instead, so it survives leaving this screen and the
+  // reboot after it; this flag only keeps two dialogs from stacking.
+  bool askingRemotePosition = false;
 
   // Held only between the keyboard screens and the request that spends them.
   // Both are wiped as soon as the login returns, and neither is ever written.
@@ -63,6 +63,10 @@ class TotoSyncActivity final : public Activity {
   void openStatusAndHelp();
   void openAdvanced();
   void offerRemotePosition();
+  // Records the answer, applies it to the inbox and, when there is signal,
+  // tells the hub. The answer never waits for Wi-Fi: it is the reader's, and
+  // it has to survive the reboot that a failed request might cause.
+  void answerRemotePosition(bool accept);
 
   void askUsername();
   void askPassword();

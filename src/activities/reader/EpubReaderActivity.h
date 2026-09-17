@@ -9,6 +9,7 @@
 #include "EndOfBookOptions.h"
 #include "EpubReaderMenuActivity.h"
 #include "ProgressMapper.h"
+#include "TotoDurableQueue.h"
 #include "activities/Activity.h"
 
 class EpubReaderActivity final : public Activity {
@@ -87,6 +88,19 @@ class EpubReaderActivity final : public Activity {
   int lastSavedSpineIndex = -1;
   int lastSavedPage = -1;
   int lastSavedPageCount = -1;
+
+  // The position another device left is asked here, inside the book, because
+  // that is where a reader can compare it with the page in front of them and
+  // where accepting it can land without closing anything.
+  bool askingRemotePosition = false;
+  // Reading the inbox means listing a directory on the SD card, so it is only
+  // done when a sync could have changed it -- plus once when the book opens.
+  bool checkedInboxOnce = false;
+  uint32_t checkedSyncGeneration = 0;
+  void maybeOfferRemotePosition();
+  void answerRemotePosition(const toto::ProgressInboxItem& item, bool accept);
+  // Moves the open book to the accepted position without reopening it.
+  void applyRemotePosition(const toto::ProgressInboxItem& item);
 
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);

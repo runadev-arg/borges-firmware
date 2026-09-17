@@ -19,6 +19,9 @@ class SyncClient {
     SERVER_ERROR,
     INVALID_RESPONSE,
     STORAGE_ERROR,
+    // The hub had already closed this suggestion. Nothing left to deliver, so
+    // the pending answer stops being retried instead of looping forever.
+    ALREADY_RESOLVED,
   };
 
   struct Outcome {
@@ -32,8 +35,16 @@ class SyncClient {
     bool hasMore = false;
   };
 
-  static Outcome syncOnce();
+  // `pullOnly` asks without sending, which is what a reconnection starts with:
+  // draining first would make the hub take this reader's stale offline
+  // position as the newest write and stop offering the other device's.
+  static Outcome syncOnce(bool pullOnly = false);
   static Result resolveSuggestion(const std::string& suggestionId, bool accept);
+
+  // Delivers the answers given while there was no signal. Returns how many are
+  // still waiting afterwards, so the scheduler knows to come back.
+  static size_t flushPendingResolutions();
+
   static const char* resultName(Result result);
 };
 

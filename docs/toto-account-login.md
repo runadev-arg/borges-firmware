@@ -123,10 +123,9 @@ re-registering the services a sign-in sets up, and discarding a reading position
 for an answer. It chooses and returns; `TotoSyncActivity` is the only screen that connects to
 Wi-Fi and spends the session, so a request can never be started from two places at once.
 
-A **reading position left by another device is a question, not a menu row.** It is asked as a
-confirmation when the screen opens and after any sync that pulls one. Backing out of the question
-decides nothing: the suggestion stays in the inbox, the status line keeps saying so, and Advanced
-still offers to drop it.
+A **reading position left by another device is a question, not a menu row.** It is asked here when
+no book is open, and inside the book when one is — see [`toto-resume.md`](toto-resume.md) for what
+the question shows, when it is asked at all, and why the answer outlives the screen.
 
 The rules behind all of this — which row is live, which sentence the status line shows, how old the
 last sync is — live in `lib/TotoSync/TotoSyncMenu.{h,cpp}`, which has no Arduino, i18n or storage

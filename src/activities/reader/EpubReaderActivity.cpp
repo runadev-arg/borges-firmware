@@ -12,6 +12,7 @@
 #include <esp_system.h>
 
 #include <algorithm>
+#include <ctime>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -36,6 +37,11 @@
 #include "TotoBookmarkSync.h"
 #include "TotoDurableQueue.h"
 #include "TotoReadingEvents.h"
+#include "TotoResumeFlow.h"
+#include "TotoResumeStore.h"
+#include "TotoSyncScheduler.h"
+#include "activities/settings/TotoSyncText.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
@@ -343,6 +349,8 @@ void EpubReaderActivity::loop() {
     finish();
     return;
   }
+
+  maybeOfferRemotePosition();
 
   // Idle glyph prewarm for the likely next page (currentPage + 1). The scan
   // pass draws nothing (FCM scan mode suppresses pixels), so the displayed
@@ -1452,6 +1460,123 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (showDictionaryMessage) {
     GUI.drawPopup(renderer, tr(STR_DICT_NO_DICT_SET));
   }
+}
+
+void EpubReaderActivity::maybeOfferRemotePosition() {
+  // Not while a dialog is up, and not on top of a chapter that is still
+  // laying itself out: the local position to compare against is not settled.
+  if (askingRemotePosition || !section || section->isBuilding()) return;
+
+  // The inbox only changes when a sync ran, so this listing happens once per
+  // book open and once per completed sync, not on every loop tick.
+  const uint32_t generation = TOTO_SYNC_SCHEDULER.syncGeneration();
+  if (checkedInboxOnce && checkedSyncGeneration == generation) return;
+  checkedInboxOnce = true;
+  checkedSyncGeneration = generation;
+
+  const std::string bookHash = TOTO_READING_EVENTS.getBookHash();
+  const auto suggestion = TOTO_QUEUE.nextSuggestionFor(bookHash);
+  if (!suggestion) return;
+
+  // Percentage only, no page: CrossPoint paginates per chapter and repaginates
+  // on a font change, so "p. 12" here and "p. 240" on a Kobo are not the same
+  // kind of number. The percentage is the one both sides mean the same by.
+  const SavedProgressPosition localProgress = ProgressMapper::toSavedProgress(epub, getCurrentPosition());
+  toto::ResumePosition local;
+  local.hasPercentage = true;
+  local.percentage = static_cast<double>(localProgress.percentage) * 100.0;
+  local.xpointer = localProgress.xpath;
+
+  toto::OfferContext context;
+  context.bookHash = suggestion->bookHash;
+  context.openBookHash = bookHash;
+  context.remote = toto::remotePositionOf(*suggestion);
+  context.local = local;
+  context.hasLocal = true;
+  if (toto::shouldOffer(TOTO_RESUME.decisions(), context) != toto::OfferRefusal::None) return;
+
+  toto::DescribeContext describe;
+  describe.remote = context.remote;
+  describe.local = local;
+  describe.hasLocal = true;
+  describe.originName = suggestion->originName;
+  describe.originPlatform = suggestion->originPlatform;
+  describe.timePrecision = suggestion->timePrecision;
+  describe.hasOccurredAt = suggestion->hasOccurredAt;
+
+  const toto::ProgressInboxItem item = *suggestion;
+  askingRemotePosition = true;
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, toto_ui::resumeHeading(),
+                                             toto_ui::resumeCardLines(toto::describeResume(describe)),
+                                             toto_ui::resumeStayLabel(), toto_ui::resumeGoLabel()),
+      [this, item](const ActivityResult& result) {
+        askingRemotePosition = false;
+        // Leaving the dialog is "stay here", the same as the
+        // option that says so. Nothing here is undecided.
+        answerRemotePosition(item, !result.isCancelled);
+      });
+}
+
+void EpubReaderActivity::answerRemotePosition(const toto::ProgressInboxItem& item, bool accept) {
+  const std::time_t wallClock = std::time(nullptr);
+  const uint64_t now = wallClock > 0 ? static_cast<uint64_t>(wallClock) : 0;
+  // Durable before the jump: a reader who accepts and loses power mid-render
+  // must not be asked the same question again, and one who refuses must not
+  // have it proposed on the next reconnection.
+  if (!TOTO_RESUME.remember(item.bookHash, toto::remotePositionOf(item), accept, item.suggestionId, now,
+                            item.suggestionId.empty())) {
+    LOG_ERR("TOTO", "Could not record the answer to the remote position; leaving it pending");
+    return;
+  }
+
+  if (!accept) {
+    // Refusing changes nothing about where the reader is: the page in front of
+    // them stays exactly where it was, and the suggestion leaves the inbox.
+    TOTO_QUEUE.resolveProgress(item.serverSequence);
+    return;
+  }
+  // Marked accepted before it is applied, so a reboot between the two reopens
+  // the book at the accepted position instead of losing it.
+  if (!TOTO_QUEUE.acceptProgress(item)) {
+    LOG_ERR("TOTO", "Could not mark the remote position as accepted");
+    return;
+  }
+  applyRemotePosition(item);
+}
+
+void EpubReaderActivity::applyRemotePosition(const toto::ProgressInboxItem& item) {
+  const SavedProgressPosition saved{
+      .xpath = item.xpointer,
+      .percentage = static_cast<float>(item.percentage / 100.0),
+  };
+  const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
+  const CrossPointPosition mapped = ProgressMapper::toCrossPoint(epub, saved, renderer, currentSpineIndex, totalPages);
+
+  if (!saveProgress(mapped.spineIndex, mapped.pageNumber, mapped.totalPages)) {
+    LOG_ERR("TOTO", "Could not persist the accepted remote position");
+    return;
+  }
+  TOTO_QUEUE.resolveProgressThrough(item.bookHash, item.serverSequence);
+
+  {
+    RenderLock lock(*this);
+    if (currentSpineIndex != mapped.spineIndex) {
+      currentSpineIndex = mapped.spineIndex;
+      nextPageNumber = mapped.pageNumber;
+      cachedSpineIndex = mapped.spineIndex;
+      cachedChapterTotalPageCount = mapped.totalPages;
+      section.reset();
+    } else if (section) {
+      section->currentPage = std::max(0, mapped.pageNumber);
+    } else {
+      nextPageNumber = mapped.pageNumber;
+    }
+  }
+  // render() notices the position moved, saves it and queues this reader's own
+  // progress event, which is what tells the hub the suggestion was taken up.
+  requestUpdate();
+  LOG_INF("TOTO", "Applied the position left by another device at %.1f%%", item.percentage);
 }
 
 bool EpubReaderActivity::applyDeferredReposition() {

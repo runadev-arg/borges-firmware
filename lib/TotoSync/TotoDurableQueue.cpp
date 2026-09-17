@@ -12,6 +12,8 @@
 #include <limits>
 #include <utility>
 
+#include "TotoResumeStore.h"
+
 namespace toto {
 namespace {
 
@@ -56,6 +58,35 @@ std::optional<uint64_t> decimalSequence(const char* value) {
 }
 
 }  // namespace
+
+namespace {
+// Keeps a normalized report from reaching the screen as "p. 6000 of 10000".
+void takeReadablePage(ResumePosition& position, uint32_t currentPage, uint32_t totalPages) {
+  if (totalPages == NORMALIZED_PAGE_SCALE) return;
+  position.currentPage = currentPage;
+  position.totalPages = totalPages;
+}
+}  // namespace
+
+ResumePosition remotePositionOf(const ProgressInboxItem& item) {
+  ResumePosition position;
+  position.hasPercentage = true;
+  position.percentage = item.percentage;
+  takeReadablePage(position, item.currentPage, item.totalPages);
+  position.xpointer = item.xpointer;
+  position.eventId = item.eventId;
+  position.serverSequence = item.serverSequence;
+  return position;
+}
+
+ResumePosition hubLocalPositionOf(const ProgressInboxItem& item) {
+  ResumePosition position;
+  if (!item.hasLocal) return position;
+  position.hasPercentage = true;
+  position.percentage = item.localPercentage;
+  takeReadablePage(position, item.localCurrentPage, item.localTotalPages);
+  return position;
+}
 
 DurableQueue& DurableQueue::instance() {
   static DurableQueue queue;
@@ -232,6 +263,20 @@ std::optional<ProgressInboxItem> DurableQueue::nextProgressDecision() const {
   return newest;
 }
 
+std::optional<ProgressInboxItem> DurableQueue::nextSuggestionFor(std::string_view bookHash) const {
+  if (bookHash.empty()) return std::nullopt;
+  std::optional<ProgressInboxItem> newest;
+  for (const String& filename : Storage.listFiles(INBOX_DIR, MAX_QUEUE_SCAN)) {
+    const auto item = readProgressInbox(filename.c_str());
+    if (!item || item->accepted || item->bookHash != bookHash ||
+        (item->directive != "suggest_resume" && item->directive != "suggest_jump")) {
+      continue;
+    }
+    if (!newest || item->serverSequence > newest->serverSequence) newest = item;
+  }
+  return newest;
+}
+
 std::optional<ProgressInboxItem> DurableQueue::nextApplicableProgress(std::string_view bookHash) const {
   std::optional<ProgressInboxItem> newest;
   for (const String& filename : Storage.listFiles(INBOX_DIR, MAX_QUEUE_SCAN)) {
@@ -343,6 +388,13 @@ bool DurableQueue::purgeAccountState() {
     }
   }
 
+  // The remembered answers to "continue from the other device?" name
+  // suggestions issued to the account being left, so they leave with it.
+  if (!TOTO_RESUME.purge()) {
+    LOG_ERR("TOTO", "Could not clear remembered resume decisions while changing account");
+    return false;
+  }
+
   state.nextSequence = 1;
   state.appliedCursor = 0;
   if (!saveCheckpoint()) return false;
@@ -452,6 +504,23 @@ std::optional<ProgressInboxItem> DurableQueue::readProgressInbox(std::string_vie
   item.xpointer =
       source["xpointer"].isNull() ? std::string(payload["xpointer"] | "") : source["xpointer"].as<std::string>();
   item.accepted = accepted;
+
+  item.eventId = event["event_id"] | "";
+  const JsonObjectConst origin = event["origin_device"].as<JsonObjectConst>();
+  item.originName = origin["name"] | "";
+  item.originPlatform = origin["platform"] | "";
+  item.timePrecision = event["time_precision"] | "";
+  item.hasOccurredAt = !std::string(event["occurred_at"] | "").empty();
+
+  const JsonObjectConst local = event["directive_metadata"]["local"].as<JsonObjectConst>();
+  if (!local.isNull() && !local["percentage"].isNull()) {
+    item.hasLocal = true;
+    item.localPercentage = local["percentage"] | 0.0;
+    item.localCurrentPage = local["current_page"] | 0U;
+    item.localTotalPages = local["total_pages"] | 0U;
+    if (item.localPercentage < 0 || item.localPercentage > 100) item.hasLocal = false;
+  }
+
   if (item.bookHash.size() != 32 || item.percentage < 0 || item.percentage > 100) return std::nullopt;
   return item;
 }

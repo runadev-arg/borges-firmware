@@ -24,7 +24,9 @@ class ReadingEvents {
 
  private:
   static constexpr size_t PAGE_ROWS_PER_EVENT = 20;
-  static constexpr uint32_t NORMALIZED_TOTAL_PAGES = 10000;
+  // One source of truth with the reader screens, which have to recognise this
+  // scale to avoid printing it as a page number.
+  static constexpr uint32_t NORMALIZED_TOTAL_PAGES = NORMALIZED_PAGE_SCALE;
   static constexpr uint32_t MIN_SESSION_SECONDS = 60;
   static constexpr uint32_t MAX_SESSION_SECONDS = 4U * 60U * 60U;
 

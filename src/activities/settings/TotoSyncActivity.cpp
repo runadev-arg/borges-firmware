@@ -16,6 +16,8 @@
 #include "TotoDurableQueue.h"
 #include "TotoLoginClient.h"
 #include "TotoPairingClient.h"
+#include "TotoResumeFlow.h"
+#include "TotoResumeStore.h"
 #include "TotoSyncAdvancedActivity.h"
 #include "TotoSyncClient.h"
 #include "TotoSyncStatusActivity.h"
@@ -45,7 +47,7 @@ void TotoSyncActivity::onEnter() {
   Activity::onEnter();
   selectedIndex = 0;
   working = false;
-  offeredSuggestionId.reset();
+  askingRemotePosition = false;
   resultText.clear();
   refreshSnapshot();
   requestUpdate();
@@ -64,10 +66,21 @@ void TotoSyncActivity::loop() {
   }
   // A position left by another device is a question, not a menu row: asking it
   // here is what keeps "accept" and "discard" from looking like two features.
-  if (progressDecision && offeredSuggestionId != progressDecision->suggestionId) {
-    offeredSuggestionId = progressDecision->suggestionId;
-    offerRemotePosition();
-    return;
+  if (progressDecision) {
+    toto::OfferContext context;
+    context.bookHash = progressDecision->bookHash;
+    // No book is open on this screen, so the suggestion's own book is the one
+    // being asked about. The rest of the gate still applies.
+    context.openBookHash = progressDecision->bookHash;
+    context.remote = toto::remotePositionOf(*progressDecision);
+    context.local = toto::hubLocalPositionOf(*progressDecision);
+    context.hasLocal = progressDecision->hasLocal;
+    context.dialogVisible = askingRemotePosition;
+    if (toto::shouldOffer(TOTO_RESUME.decisions(), context) == toto::OfferRefusal::None) {
+      askingRemotePosition = true;
+      offerRemotePosition();
+      return;
+    }
   }
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
@@ -184,27 +197,66 @@ void TotoSyncActivity::openAdvanced() {
                                ensureWifiThen(Action::RepairServices);
                                return;
                              case toto::AdvancedRow::DiscardRemotePosition:
-                               ensureWifiThen(Action::DismissProgress);
+                               answerRemotePosition(false);
                                return;
                            }
                          });
 }
 
 void TotoSyncActivity::offerRemotePosition() {
-  std::array<char, 128> body{};
-  std::snprintf(body.data(), body.size(), tr(STR_TOTO_RESUME_BODY), progressDecision->percentage);
-  startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_TOTO_RESUME_HEADING), body.data()),
-      [this](const ActivityResult& result) {
-        if (result.isCancelled) {
-          // Backing out decides nothing: the suggestion stays in the inbox and
-          // Advanced still offers to drop it.
-          resultText = tr(STR_TOTO_RESUME_LATER);
-          requestUpdate();
-          return;
-        }
-        ensureWifiThen(Action::AcceptProgress);
-      });
+  toto::DescribeContext describe;
+  describe.remote = toto::remotePositionOf(*progressDecision);
+  describe.local = toto::hubLocalPositionOf(*progressDecision);
+  describe.hasLocal = progressDecision->hasLocal;
+  describe.originName = progressDecision->originName;
+  describe.originPlatform = progressDecision->originPlatform;
+  describe.timePrecision = progressDecision->timePrecision;
+  describe.hasOccurredAt = progressDecision->hasOccurredAt;
+
+  const toto::ResumeCard card = toto::describeResume(describe);
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, toto_ui::resumeHeading(),
+                                                                toto_ui::resumeCardLines(card),
+                                                                toto_ui::resumeStayLabel(), toto_ui::resumeGoLabel()),
+                         [this](const ActivityResult& result) {
+                           askingRemotePosition = false;
+                           // Both options are answers. "Stay here" is what backing out means too,
+                           // and it is recorded, so the same position is not proposed again.
+                           answerRemotePosition(!result.isCancelled);
+                         });
+}
+
+void TotoSyncActivity::answerRemotePosition(bool accept) {
+  if (!progressDecision) return;
+  const toto::ProgressInboxItem item = *progressDecision;
+
+  // Durable before anything else. A reader who says "stay here" with no signal
+  // and reboots must not be asked the same thing again.
+  if (!TOTO_RESUME.remember(item.bookHash, toto::remotePositionOf(item), accept, item.suggestionId, nowUnixSeconds(),
+                            item.suggestionId.empty())) {
+    // The card refused the write. Asking again on the next loop would put the
+    // reader in a dialog they cannot leave, so this screen stops asking and
+    // says so instead.
+    askingRemotePosition = true;
+    resultText = tr(STR_TOTO_FAILED);
+    requestUpdate();
+    return;
+  }
+
+  const bool stored = accept ? TOTO_QUEUE.acceptProgress(item) : TOTO_QUEUE.resolveProgress(item.serverSequence);
+  if (!stored) {
+    resultText = tr(STR_TOTO_FAILED);
+  } else {
+    resultText = accept ? tr(STR_TOTO_RESUME_ACCEPTED) : tr(STR_TOTO_RESUME_KEPT);
+  }
+  refreshSnapshot();
+
+  // Telling the hub is the only part that needs signal, and it is retried by
+  // the scheduler, so nothing here asks the reader to connect first.
+  if (!item.suggestionId.empty() && WiFi.status() == WL_CONNECTED) {
+    pendingAction = Action::DeliverAnswers;
+    working = true;
+  }
+  requestUpdate();
 }
 
 void TotoSyncActivity::askUsername() {
@@ -352,26 +404,12 @@ void TotoSyncActivity::performPendingAction() {
       }
       break;
     }
-    case Action::AcceptProgress:
-    case Action::DismissProgress: {
-      if (!progressDecision) break;
-      const bool accept = pendingAction == Action::AcceptProgress;
-      const auto result = toto::SyncClient::resolveSuggestion(progressDecision->suggestionId, accept);
-      if (result == toto::SyncClient::Result::OK) {
-        const bool stored = accept ? TOTO_QUEUE.acceptProgress(*progressDecision)
-                                   : TOTO_QUEUE.resolveProgress(progressDecision->serverSequence);
-        if (!stored) {
-          resultText = tr(STR_TOTO_FAILED);
-        } else if (accept) {
-          resultText = tr(STR_TOTO_RESUME_ACCEPTED);
-        } else {
-          resultText = tr(STR_TOTO_RESUME_DISMISSED);
-        }
-      } else {
-        resultText = std::string(tr(STR_TOTO_FAILED)) + ": " + toto::SyncClient::resultName(result);
-      }
+    case Action::DeliverAnswers:
+      // The answer is already durable and already applied here; this only
+      // carries it to the hub. Whatever is left keeps being retried by the
+      // scheduler, so a failure is not worth a red line on the screen.
+      toto::SyncClient::flushPendingResolutions();
       break;
-    }
   }
   refreshSnapshot();
   working = false;

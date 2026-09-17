@@ -12,6 +12,7 @@
 #include "TotoCredentialStore.h"
 #include "TotoDurableQueue.h"
 #include "TotoHttp.h"
+#include "TotoResumeStore.h"
 #include "TotoTrust.h"
 
 #ifndef CROSSPOINT_VERSION
@@ -99,7 +100,7 @@ bool shouldDefer(JsonObjectConst event) {
 
 }  // namespace
 
-SyncClient::Outcome SyncClient::syncOnce() {
+SyncClient::Outcome SyncClient::syncOnce(bool pullOnly) {
   Outcome outcome;
   if (!TOTO_CREDENTIALS.paired()) {
     outcome.result = Result::NOT_PAIRED;
@@ -120,7 +121,7 @@ SyncClient::Outcome SyncClient::syncOnce() {
     return outcome;
   }
 
-  const std::vector<PendingEvent> batch = TOTO_QUEUE.nextBatch();
+  const std::vector<PendingEvent> batch = pullOnly ? std::vector<PendingEvent>{} : TOTO_QUEUE.nextBatch();
   const bool exchanging = !batch.empty();
   if (exchanging) {
     for (const PendingEvent& event : batch) {
@@ -233,12 +234,30 @@ SyncClient::Result SyncClient::resolveSuggestion(const std::string& suggestionId
   const int code = post("/api/sync/v2/suggestions/" + suggestionId + (accept ? "/accept" : "/dismiss"), "{}", response);
   if (code <= 0) return Result::NETWORK_ERROR;
   if (code == 401 || code == 403) return Result::AUTH_ERROR;
+  // 404: the suggestion is gone. 409: it was already closed the other way,
+  // from the web or from another reader. Either way there is nothing left to
+  // deliver, and retrying it forever would be the only thing that goes wrong.
+  if (code == 404 || code == 409) return Result::ALREADY_RESOLVED;
   if (code != 200) return Result::SERVER_ERROR;
   JsonDocument document;
   if (deserializeJson(document, response) || (document["protocol_version"] | 0) != 2) {
     return Result::INVALID_RESPONSE;
   }
   return Result::OK;
+}
+
+size_t SyncClient::flushPendingResolutions() {
+  const auto pending = TOTO_RESUME.decisions().pendingResolutions();
+  if (pending.empty()) return 0;
+  if (!TOTO_CREDENTIALS.paired()) return pending.size();
+
+  size_t remaining = pending.size();
+  for (const auto& entry : pending) {
+    const Result result = resolveSuggestion(entry.decision.suggestionId, entry.decision.accepted);
+    if (result != Result::OK && result != Result::ALREADY_RESOLVED) break;
+    if (TOTO_RESUME.markSynced(entry.bookHash, entry.decision.suggestionId)) --remaining;
+  }
+  return remaining;
 }
 
 const char* SyncClient::resultName(Result result) {
@@ -263,6 +282,8 @@ const char* SyncClient::resultName(Result result) {
       return "invalid_response";
     case Result::STORAGE_ERROR:
       return "storage_error";
+    case Result::ALREADY_RESOLVED:
+      return "already_resolved";
   }
   return "unknown";
 }

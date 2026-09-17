@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdio>
+#include <utility>
 
 #include "TotoCredentialStore.h"
 
@@ -67,5 +68,64 @@ std::string lastSyncSentence(const toto::SyncSnapshot& snapshot) {
   }
   return tr(STR_TOTO_LAST_SYNC_NEVER);
 }
+
+std::string positionSentence(const toto::PositionSummary& summary) {
+  if (!summary.known) return tr(STR_TOTO_RESUME_UNKNOWN);
+
+  std::string sentence;
+  std::array<char, 64> chunk{};
+  if (summary.hasPage) {
+    if (summary.totalPages > 0) {
+      std::snprintf(chunk.data(), chunk.size(), tr(STR_TOTO_RESUME_PAGE_OF), static_cast<unsigned>(summary.page),
+                    static_cast<unsigned>(summary.totalPages));
+    } else {
+      std::snprintf(chunk.data(), chunk.size(), tr(STR_TOTO_RESUME_PAGE), static_cast<unsigned>(summary.page));
+    }
+    sentence = chunk.data();
+  }
+  if (summary.hasPercentage) {
+    std::snprintf(chunk.data(), chunk.size(), tr(STR_TOTO_RESUME_PERCENT),
+                  static_cast<unsigned>(summary.percentage + 0.5));
+    if (sentence.empty()) {
+      sentence = chunk.data();
+    } else {
+      sentence += " - ";
+      sentence += chunk.data();
+    }
+  }
+  return sentence;
+}
+
+std::vector<std::string> resumeCardLines(const toto::ResumeCard& card) {
+  std::array<char, 160> line{};
+  std::vector<std::string> lines;
+
+  std::snprintf(line.data(), line.size(), tr(STR_TOTO_RESUME_HERE), positionSentence(card.here).c_str());
+  lines.emplace_back(line.data());
+
+  const std::string origin = card.originName.empty() ? std::string(tr(STR_TOTO_RESUME_OTHER_DEVICE)) : card.originName;
+  std::snprintf(line.data(), line.size(), tr(STR_TOTO_RESUME_THERE), origin.c_str(),
+                positionSentence(card.there).c_str());
+  lines.emplace_back(line.data());
+
+  // The two warnings that change the answer go together, after a blank line
+  // and before the options: a reader about to travel backwards in their own
+  // book should read that before their thumb finds the button.
+  std::vector<std::string> warnings;
+  if (card.backwards) warnings.emplace_back(tr(STR_TOTO_RESUME_BACKWARDS));
+  if (card.smallJump) warnings.emplace_back(tr(STR_TOTO_RESUME_SMALL));
+  if (card.approximate) warnings.emplace_back(tr(STR_TOTO_RESUME_APPROXIMATE));
+  if (!warnings.empty()) {
+    lines.emplace_back();
+    for (std::string& warning : warnings) lines.push_back(std::move(warning));
+  }
+  return lines;
+}
+
+std::string resumeHeading() { return tr(STR_TOTO_RESUME_HEADING); }
+
+std::string resumeGoLabel() { return tr(STR_TOTO_RESUME_GO); }
+
+std::string resumeStayLabel() { return tr(STR_TOTO_RESUME_STAY); }
 
 }  // namespace toto_ui

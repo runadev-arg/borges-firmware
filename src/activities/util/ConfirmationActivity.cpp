@@ -2,12 +2,25 @@
 
 #include <I18n.h>
 
+#include <utility>
+
 #include "HalDisplay.h"
 #include "components/UITheme.h"
 
 ConfirmationActivity::ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                            const std::string& heading, const std::string& body)
-    : Activity("Confirmation", renderer, mappedInput), heading(heading), body(body) {}
+    : Activity("Confirmation", renderer, mappedInput), heading(heading) {
+  if (!body.empty()) bodyLines.push_back(body);
+}
+
+ConfirmationActivity::ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string heading,
+                                           std::vector<std::string> lines, std::string cancelLabel,
+                                           std::string confirmLabel)
+    : Activity("Confirmation", renderer, mappedInput),
+      heading(std::move(heading)),
+      bodyLines(std::move(lines)),
+      cancelLabel(std::move(cancelLabel)),
+      confirmLabel(std::move(confirmLabel)) {}
 
 void ConfirmationActivity::onEnter() {
   Activity::onEnter();
@@ -18,15 +31,23 @@ void ConfirmationActivity::onEnter() {
   if (!heading.empty()) {
     safeHeading = renderer.truncatedText(fontId, heading.c_str(), maxWidth, EpdFontFamily::BOLD);
   }
-  if (!body.empty()) {
-    safeBody = renderer.truncatedText(fontId, body.c_str(), maxWidth, EpdFontFamily::REGULAR);
+  safeBodyLines.clear();
+  safeBodyLines.reserve(bodyLines.size());
+  for (const std::string& line : bodyLines) {
+    if (line.empty()) {
+      safeBodyLines.emplace_back();
+      continue;
+    }
+    safeBodyLines.push_back(renderer.truncatedText(fontId, line.c_str(), maxWidth, EpdFontFamily::REGULAR));
   }
 
   // Text sits in the upper part of the screen so the confirmation popup
-  // (centered) doesn't cover it.
-  startY = renderer.getScreenHeight() / 6;
+  // (centered) doesn't cover it. More lines start higher, for the same reason.
+  startY = renderer.getScreenHeight() / (safeBodyLines.size() > 1 ? 8 : 6);
 
-  const char* options[] = {I18N.get(StrId::STR_CANCEL), I18N.get(StrId::STR_CONFIRM)};
+  const std::string cancel = cancelLabel.empty() ? std::string(I18N.get(StrId::STR_CANCEL)) : cancelLabel;
+  const std::string confirm = confirmLabel.empty() ? std::string(I18N.get(StrId::STR_CONFIRM)) : confirmLabel;
+  const char* options[] = {cancel.c_str(), confirm.c_str()};
   confirmPopup.show(safeHeading.c_str(), options, 2, 0, [this](int idx) {
     ActivityResult res;
     res.isCancelled = (idx != 1);
@@ -49,8 +70,11 @@ void ConfirmationActivity::render(RenderLock&& lock) {
   }
 
   // Draw Body
-  if (!safeBody.empty()) {
-    renderer.drawCenteredText(fontId, currentY, safeBody.c_str(), true, EpdFontFamily::REGULAR);
+  for (const std::string& line : safeBodyLines) {
+    if (!line.empty()) {
+      renderer.drawCenteredText(fontId, currentY, line.c_str(), true, EpdFontFamily::REGULAR);
+    }
+    currentY += lineHeight;
   }
 
   if (confirmPopup.processRender(renderer, mappedInput)) return;
