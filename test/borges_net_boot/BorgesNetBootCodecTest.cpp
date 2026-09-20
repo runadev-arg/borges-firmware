@@ -86,19 +86,19 @@ TEST(BorgesNetBootCodec, BuildsShortQueryByteForByte) {
 TEST(BorgesNetBootCodec, BuildsProductionHostQuery) {
   std::array<uint8_t, borges::netboot::DNS_MAX_QUERY> out{};
   const size_t written = borges::netboot::buildDnsQueryTcp("borges.runadev.com", ID, out.data(), out.size());
-  ASSERT_EQ(written, 42U);
+  ASSERT_EQ(written, 38U);
   EXPECT_EQ(out[0], 0x00);
-  EXPECT_EQ(out[1], 0x28);  // 40-byte message
+  EXPECT_EQ(out[1], 0x24);  // 36-byte message
 
-  const std::vector<uint8_t> expectedQname = {0x0A, 'h', 'i', 'g', 'h', 'l', 'i', 'g',  'h', 't', 's', 0x07,
+  const std::vector<uint8_t> expectedQname = {0x06, 'b', 'o', 'r', 'g', 'e', 's', 0x07,
                                               'r',  'u', 'n', 'a', 'd', 'e', 'v', 0x03, 'c', 'o', 'm', 0x00};
   for (size_t index = 0; index < expectedQname.size(); ++index) {
     EXPECT_EQ(out[14 + index], expectedQname[index]) << "qname byte " << index;
   }
-  EXPECT_EQ(out[38], 0x00);
-  EXPECT_EQ(out[39], 0x01);  // QTYPE = A
-  EXPECT_EQ(out[40], 0x00);
-  EXPECT_EQ(out[41], 0x01);  // QCLASS = IN
+  EXPECT_EQ(out[34], 0x00);
+  EXPECT_EQ(out[35], 0x01);  // QTYPE = A
+  EXPECT_EQ(out[36], 0x00);
+  EXPECT_EQ(out[37], 0x01);  // QCLASS = IN
 }
 
 // Case 3: every rejected input shape.
