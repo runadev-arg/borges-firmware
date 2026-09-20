@@ -17,6 +17,7 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "TotoCredentialStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -112,6 +113,16 @@ void HomeActivity::onEnter() {
   Activity::onEnter();
 
   hasOpdsServers = OPDS_STORE.hasServers();
+  hasCinabrioLibrary = false;
+  if (TOTO_CREDENTIALS.paired()) {
+    const std::string cinabrioUrl = TOTO_CREDENTIALS.getBaseUrl() + "/api/opds";
+    for (const auto& server : OPDS_STORE.getServers()) {
+      if (server.url == cinabrioUrl) {
+        hasCinabrioLibrary = true;
+        break;
+      }
+    }
+  }
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   loadRecentBooks(metrics.homeRecentBooksCount);
@@ -305,7 +316,7 @@ void HomeActivity::render(RenderLock&&) {
   std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Settings};
 
   if (hasOpdsServers) {
-    menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
+    menuItems.insert(menuItems.begin() + 2, hasCinabrioLibrary ? tr(STR_CINABRIO_LIBRARY) : tr(STR_OPDS_BROWSER));
     menuIcons.insert(menuIcons.begin() + 2, Library);
   }
 

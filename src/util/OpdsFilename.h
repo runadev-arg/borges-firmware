@@ -16,3 +16,5 @@ enum class OpdsFilenameFormat : uint8_t {
 // for a downloaded OPDS book, according to `format`. When the author is empty,
 // every format collapses to just the sanitized title. Pure: no I/O, no globals.
 std::string opdsBookFilename(const std::string& author, const std::string& title, OpdsFilenameFormat format);
+std::string cinabrioBookFilename(const std::string& author, const std::string& title, OpdsFilenameFormat format,
+                                 const std::string& acquisitionHref);

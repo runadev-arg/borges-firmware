@@ -26,12 +26,18 @@ struct ProgressInboxItem {
   uint64_t serverSequence = 0;
   std::string directive;
   std::string suggestionId;
+  std::string sourceDeviceName;
   std::string bookHash;
   double percentage = 0;
   uint32_t currentPage = 0;
   uint32_t totalPages = 0;
   std::string xpointer;
   bool accepted = false;
+  bool dismissed = false;
+  bool manualRecovery = false;
+  std::string recoveryRequestId;
+  bool recoveryResolved = false;
+  uint64_t supersedingStreamSequence = 0;
 };
 
 struct AnnotationInboxItem {
@@ -70,11 +76,17 @@ class DurableQueue {
   bool markAttempted(const PendingEvent& event);
   bool retireAcknowledged(std::string_view eventId, uint64_t sequence);
   bool deferPulled(uint64_t serverSequence, const std::string& eventJson);
-  std::optional<ProgressInboxItem> nextProgressDecision() const;
+  // A user-requested snapshot has its own durable identity; its revision is
+  // never a stream sequence and must not advance the pull cursor.
+  bool restoreProgressCandidate(std::string_view bookHash, const std::string& eventJson);
+  std::optional<ProgressInboxItem> nextProgressDecision(std::string_view bookHash = {},
+                                                        bool includeDismissed = false) const;
+  bool dismissProgress(const ProgressInboxItem& item);
   std::optional<ProgressInboxItem> nextApplicableProgress(std::string_view bookHash) const;
   std::optional<AnnotationInboxItem> nextAnnotation(std::string_view bookHash, uint64_t afterSequence = 0) const;
   bool acceptProgress(const ProgressInboxItem& item);
   bool resolveProgress(uint64_t serverSequence);
+  bool resolveProgress(const ProgressInboxItem& item);
   bool resolveProgressThrough(std::string_view bookHash, uint64_t serverSequence);
   bool resolveInbox(uint64_t serverSequence);
   size_t depth() const;
@@ -99,6 +111,8 @@ class DurableQueue {
   static std::optional<ProgressInboxItem> readProgressInbox(std::string_view filename);
   static std::optional<AnnotationInboxItem> readAnnotationInbox(std::string_view filename);
   static bool removeInboxFile(uint64_t serverSequence);
+  static bool setRecoveryDecision(const ProgressInboxItem& item, const char* decision, uint64_t streamSequence = 0);
+  static std::optional<ProgressInboxItem> readStreamProgress(uint64_t serverSequence);
   static bool writeAtomic(const std::string& finalPath, const uint8_t* data, size_t size);
 };
 

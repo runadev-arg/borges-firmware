@@ -11,6 +11,8 @@
 #include "TotoCredentialStore.h"
 #include "TotoDurableQueue.h"
 #include "TotoNetBoot.h"
+#include "TotoProgressRecovery.h"
+#include "TotoPullValidation.h"
 #include "TotoTrust.h"
 
 #ifndef CROSSPOINT_VERSION
@@ -74,7 +76,7 @@ std::string pullBody(uint64_t cursor, size_t queueDepth) {
          "\",\"limit\":" + std::to_string(PULL_LIMIT) + ",\"client\":" + clientTelemetry(queueDepth) + "}";
 }
 
-int post(const std::string& path, const std::string& body, std::string& response) {
+int request(const char* method, const std::string& path, const std::string& body, std::string& response) {
   // Same bootstrap as pairing: without it the sync stays dead on exactly the
   // networks the pairing fix was written for. No candidate loop here -- the
   // scheduler already retries.
@@ -99,7 +101,7 @@ int post(const std::string& path, const std::string& body, std::string& response
 
   response.clear();
   response.reserve(4096);
-  const int code = http.sendRequest("POST", reinterpret_cast<const uint8_t*>(body.data()), body.size(),
+  const int code = http.sendRequest(method, reinterpret_cast<const uint8_t*>(body.data()), body.size(),
                                     [&response](const uint8_t* data, size_t size) {
                                       if (response.size() + size > MAX_RESPONSE_BYTES) return false;
                                       response.append(reinterpret_cast<const char*>(data), size);
@@ -108,6 +110,10 @@ int post(const std::string& path, const std::string& body, std::string& response
   const bool complete = http.responseComplete() && !http.callbackAborted();
   http.end();
   return complete ? code : -2;
+}
+
+int post(const std::string& path, const std::string& body, std::string& response) {
+  return request("POST", path, body, response);
 }
 
 bool shouldDefer(JsonObjectConst event) {
@@ -120,7 +126,67 @@ bool shouldDefer(JsonObjectConst event) {
 
 }  // namespace
 
+SyncClient::RecoveryOutcome SyncClient::fetchProgress(const std::string& bookHash, bool otherDeviceOnly) {
+  RecoveryOutcome result;
+  if (!validRecoveryBookHash(bookHash)) return result;
+  if (!TOTO_CREDENTIALS.paired()) {
+    result.result = Result::NOT_PAIRED;
+    return result;
+  }
+  if (!TOTO_QUEUE.begin()) {
+    result.result = Result::STORAGE_ERROR;
+    return result;
+  }
+  if (insufficientHeap()) {
+    result.result = Result::LOW_MEMORY;
+    return result;
+  }
+  if (!ensureTrustedClock()) {
+    result.result = Result::CLOCK_ERROR;
+    return result;
+  }
+  std::string response;
+  const int code = request(
+      "GET",
+      "/api/sync/v2/progress/positions?book_identifier_kind=koreader_partial_md5&book_identifier_value=" + bookHash, {},
+      response);
+  result.httpCode = code > 0 ? code : 0;
+  if (code <= 0) {
+    result.result = Result::NETWORK_ERROR;
+    return result;
+  }
+  if (code == 401 || code == 403) {
+    result.result = Result::AUTH_ERROR;
+    return result;
+  }
+  if (code != 200) {
+    result.result = Result::SERVER_ERROR;
+    return result;
+  }
+  JsonDocument document;
+  if (deserializeJson(document, response)) return result;
+  const auto selected = selectRecoveryPosition(document.as<JsonObjectConst>(), bookHash, otherDeviceOnly);
+  if (!selected.valid) return result;
+  result.found = !selected.eventJson.empty();
+  if (result.found && !TOTO_QUEUE.restoreProgressCandidate(bookHash, selected.eventJson)) {
+    result.result = Result::STORAGE_ERROR;
+    return result;
+  }
+  result.result = Result::OK;
+  return result;
+}
+
 SyncClient::Outcome SyncClient::syncOnce() {
+  // Persist the complete remote backlog before exposing any queued local position.
+  // A failed/truncated pull or more pages must never fall through to an upload.
+  Outcome pulled = syncStep(false);
+  if (!mayUploadAfterPull(pulled.result == Result::OK, pulled.hasMore) || pulled.queueDepth == 0) return pulled;
+  Outcome exchanged = syncStep(true);
+  exchanged.pulled += pulled.pulled;
+  return exchanged;
+}
+
+SyncClient::Outcome SyncClient::syncStep(bool allowUpload) {
   Outcome outcome;
   if (!TOTO_CREDENTIALS.paired()) {
     outcome.result = Result::NOT_PAIRED;
@@ -141,7 +207,7 @@ SyncClient::Outcome SyncClient::syncOnce() {
     return outcome;
   }
 
-  const std::vector<PendingEvent> batch = TOTO_QUEUE.nextBatch();
+  const std::vector<PendingEvent> batch = allowUpload ? TOTO_QUEUE.nextBatch() : std::vector<PendingEvent>{};
   const bool exchanging = !batch.empty();
   if (exchanging) {
     for (const PendingEvent& event : batch) {
@@ -176,30 +242,12 @@ SyncClient::Outcome SyncClient::syncOnce() {
     return outcome;
   }
 
-  if (exchanging) {
-    for (JsonObjectConst acknowledgement : document["acknowledgements"].as<JsonArrayConst>()) {
-      const char* id = acknowledgement["client_event_id"] | "";
-      const char* sequenceText = acknowledgement["client_sequence"] | "";
-      const std::string status = acknowledgement["status"] | "";
-      for (const PendingEvent& event : batch) {
-        if (!acknowledgmentMatches(event.id, event.sequence, id, sequenceText)) continue;
-        if (status == "accepted" || status == "rejected") {
-          if (!TOTO_QUEUE.retireAcknowledged(event.id, event.sequence)) {
-            outcome.result = Result::STORAGE_ERROR;
-            return outcome;
-          }
-          if (status == "accepted") {
-            ++outcome.acknowledged;
-          } else {
-            ++outcome.rejected;
-            TOTO_CREDENTIALS.setLastError(acknowledgement["rejection_code"] | "event_rejected");
-          }
-        }
-      }
-    }
-  }
-
   const JsonObjectConst pull = exchanging ? document["pull"].as<JsonObjectConst>() : document.as<JsonObjectConst>();
+  const auto validated = validatePull(pull, outcome.cursor);
+  if (!validated || (exchanging && !document["acknowledgements"].is<JsonArrayConst>())) {
+    outcome.result = Result::INVALID_RESPONSE;
+    return outcome;
+  }
   uint64_t lastSeenSequence = outcome.cursor;
   for (JsonObjectConst event : pull["events"].as<JsonArrayConst>()) {
     const auto serverSequence = decimalSequence(event["server_sequence"] | "");
@@ -226,7 +274,30 @@ SyncClient::Outcome SyncClient::syncOnce() {
     return outcome;
   }
   outcome.cursor = *responseCursor;
-  outcome.hasMore = pull["has_more"] | false;
+  outcome.hasMore = validated->hasMore;
+
+  if (exchanging) {
+    for (JsonObjectConst acknowledgement : document["acknowledgements"].as<JsonArrayConst>()) {
+      const char* id = acknowledgement["client_event_id"] | "";
+      const char* sequenceText = acknowledgement["client_sequence"] | "";
+      const std::string status = acknowledgement["status"] | "";
+      for (const PendingEvent& event : batch) {
+        if (!acknowledgmentMatches(event.id, event.sequence, id, sequenceText)) continue;
+        if (status == "accepted" || status == "rejected") {
+          if (!TOTO_QUEUE.retireAcknowledged(event.id, event.sequence)) {
+            outcome.result = Result::STORAGE_ERROR;
+            return outcome;
+          }
+          if (status == "accepted") {
+            ++outcome.acknowledged;
+          } else {
+            ++outcome.rejected;
+            TOTO_CREDENTIALS.setLastError(acknowledgement["rejection_code"] | "event_rejected");
+          }
+        }
+      }
+    }
+  }
 
   if (const auto serverTime = parseRfc3339Utc(document["server_time"] | ""); serverTime.has_value()) {
     TOTO_QUEUE.setWallAnchor(*serverTime, millis());

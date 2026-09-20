@@ -3,12 +3,18 @@
 #include <Arduino.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <SHA2Builder.h>
 #include <base64.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
 
 #include <functional>
 #include <string>
+
+#include "DownloadPolicy.h"
+#include "TotoCredentialStore.h"
+#include "TotoNetBoot.h"
+#include "TotoTrust.h"
 
 #if defined(FREEINK_NET_WOLFSSL)
 #include <SecureHttpClient.h>
@@ -36,6 +42,7 @@ struct Sink {
   bool* cancelFlag = nullptr;
   size_t total = 0;
   size_t downloaded = 0;
+  std::string contentSha256;
 };
 
 bool isRedirect(int status) {
@@ -46,14 +53,29 @@ bool isRedirect(int status) {
 HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std::string& username,
                                          const std::string& password, Sink& sink) {
   std::string url = startUrl;
+  toto::netboot::WifiFullPowerScope fullPower;
+  const bool cinabrio =
+      TOTO_CREDENTIALS.paired() && download_policy::sameOrigin(startUrl, TOTO_CREDENTIALS.getBaseUrl());
 
   for (int hop = 0; hop <= MAX_REDIRECTS; ++hop) {
     freeink::SecureHttpClient http;
     http.setTimeout(HTTP_TIMEOUT_MS);
-    http.setInsecure();
+    // Pairing tokens and canonical books require the same verified trust as sync.
+    if (cinabrio) {
+      if (!toto::ensureTrustedClock()) return HttpDownloader::HTTP_ERROR;
+      http.setCACert(toto::rootCertificate());
+    } else {
+      http.setInsecure();
+    }
     if (!http.begin(url)) {
       LOG_ERR("HTTP", "wolfSSL bad URL: %s", url.c_str());
       return HttpDownloader::HTTP_ERROR;
+    }
+    if (cinabrio) {
+      const std::string host = toto::netboot::hostFromBaseUrl(TOTO_CREDENTIALS.getBaseUrl());
+      const auto candidates = toto::netboot::resolveServer(host.c_str());
+      if (candidates.count == 0) return HttpDownloader::HTTP_ERROR;
+      http.setServerAddress(candidates.ip[0]);
     }
     // setUserAgent replaces SecureHttpClient's built-in UA; addHeader would
     // append a second User-Agent header, which strict servers reject (aiohttp
@@ -84,16 +106,20 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
     }
     if (isRedirect(status)) {
       const std::string location = http.getHeader("location");
-      if (location.empty() || !freeink::SecureHttpClient::resolveUrl(url, location, url)) {
+      std::string nextUrl;
+      if (location.empty() || !freeink::SecureHttpClient::resolveUrl(url, location, nextUrl) ||
+          !download_policy::safeRedirect(startUrl, nextUrl, !username.empty() || !password.empty())) {
         LOG_ERR("HTTP", "wolfSSL bad redirect: %d", status);
         return HttpDownloader::HTTP_ERROR;
       }
+      url = std::move(nextUrl);
       continue;
     }
     if (status != 200) {
       LOG_ERR("HTTP", "wolfSSL unexpected status: %d", status);
       return HttpDownloader::HTTP_ERROR;
     }
+    sink.contentSha256 = http.getHeader("x-content-sha256");
     if (http.callbackAborted()) return HttpDownloader::FILE_ERROR;
     if (!http.responseComplete()) {
       LOG_ERR("HTTP", "wolfSSL incomplete: got %zu of %zu bytes", sink.downloaded, sink.total);
@@ -157,7 +183,8 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     if (esp_http_client_set_redirection(client) != ESP_OK) break;
     char redirectedUrl[768] = {};
     if (esp_http_client_get_url(client, redirectedUrl, sizeof(redirectedUrl)) != ESP_OK ||
-        (requireHttps && strncmp(redirectedUrl, "https://", 8) != 0)) {
+        (requireHttps && strncmp(redirectedUrl, "https://", 8) != 0) ||
+        !download_policy::safeRedirect(url, redirectedUrl, !username.empty() || !password.empty())) {
       LOG_ERR("HTTP", "refusing invalid or insecure redirect");
       esp_http_client_cleanup(client);
       return HttpDownloader::HTTP_ERROR;
@@ -279,12 +306,31 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
                                                              const std::string& username, const std::string& password) {
   LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());
 
-  if (Storage.exists(destPath.c_str())) {
-    Storage.remove(destPath.c_str());
+  // A book can be several MB and the radio may disappear mid-transfer. Keep
+  // the previous EPUB readable until the new body is complete. These two cold-
+  // path strings are the only extra heap allocation; the body still streams
+  // through the single 1 KiB READ_CHUNK buffer above.
+  const std::string tempPath = destPath + ".part";
+  const std::string backupPath = destPath + ".bak";
+  if (Storage.exists(backupPath.c_str())) {
+    if (Storage.exists(destPath.c_str())) {
+      if (!Storage.remove(backupPath.c_str())) {
+        LOG_ERR("HTTP", "Failed to remove stale download backup: %s", backupPath.c_str());
+        return FILE_ERROR;
+      }
+    } else if (!Storage.rename(backupPath.c_str(), destPath.c_str())) {
+      LOG_ERR("HTTP", "Failed to recover prior download: %s", destPath.c_str());
+      return FILE_ERROR;
+    }
   }
+  if (Storage.exists(tempPath.c_str()) && !Storage.remove(tempPath.c_str())) {
+    LOG_ERR("HTTP", "Failed to remove stale partial download: %s", tempPath.c_str());
+    return FILE_ERROR;
+  }
+
   HalFile file;
-  if (!Storage.openFileForWrite("HTTP", destPath.c_str(), file)) {
-    LOG_ERR("HTTP", "Failed to open file for writing");
+  if (!Storage.openFileForWrite("HTTP", tempPath.c_str(), file)) {
+    LOG_ERR("HTTP", "Failed to open temporary file for writing");
     return FILE_ERROR;
   }
 
@@ -293,20 +339,58 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   sink.cancelFlag = cancelFlag;
   sink.write = [&file](const uint8_t* data, size_t len) { return file.write(data, len) == len; };
 
+  SHA256Builder contentHash;
+  contentHash.begin();
+  sink.write = [&file, &contentHash](const uint8_t* data, size_t len) {
+    if (file.write(data, len) != len) return false;
+    contentHash.add(data, len);
+    return true;
+  };
   const DownloadError result = runGetSecure(url, username, password, sink);
-  // Close before any remove() on the same path; DESTRUCTOR_CLOSES_FILE would
-  // otherwise close only after the remove.
+  if (result == OK) file.flush();
+  // Close before remove/rename; DESTRUCTOR_CLOSES_FILE would otherwise close
+  // only after those directory operations.
   file.close();
 
   if (result != OK) {
-    Storage.remove(destPath.c_str());
+    Storage.remove(tempPath.c_str());
     return result;
   }
   if (sink.downloaded == 0) {
     LOG_ERR("HTTP", "no data received");
-    Storage.remove(destPath.c_str());
+    Storage.remove(tempPath.c_str());
     return HTTP_ERROR;
   }
+
+  contentHash.calculate();
+#if defined(FREEINK_NET_WOLFSSL)
+  const bool canonical = TOTO_CREDENTIALS.paired() && download_policy::sameOrigin(url, TOTO_CREDENTIALS.getBaseUrl()) &&
+                         url.find("/api/opds/books/") != std::string::npos;
+  if (canonical && sink.contentSha256.size() != 64) {
+    LOG_ERR("HTTP", "Canonical EPUB is missing its integrity checksum");
+    Storage.remove(tempPath.c_str());
+    return HTTP_ERROR;
+  }
+#endif
+  if (!sink.contentSha256.empty() && contentHash.toString() != sink.contentSha256.c_str()) {
+    LOG_ERR("HTTP", "Canonical EPUB SHA-256 mismatch; preserving the prior book");
+    Storage.remove(tempPath.c_str());
+    return HTTP_ERROR;
+  }
+
+  const bool hadFinal = Storage.exists(destPath.c_str());
+  if (hadFinal && !Storage.rename(destPath.c_str(), backupPath.c_str())) {
+    LOG_ERR("HTTP", "Failed to preserve prior download: %s", destPath.c_str());
+    Storage.remove(tempPath.c_str());
+    return FILE_ERROR;
+  }
+  if (!Storage.rename(tempPath.c_str(), destPath.c_str())) {
+    LOG_ERR("HTTP", "Failed to publish completed download: %s", destPath.c_str());
+    if (hadFinal) Storage.rename(backupPath.c_str(), destPath.c_str());
+    Storage.remove(tempPath.c_str());
+    return FILE_ERROR;
+  }
+  Storage.remove(backupPath.c_str());
   LOG_DBG("HTTP", "Downloaded %zu bytes", sink.downloaded);
   return OK;
 }

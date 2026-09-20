@@ -27,6 +27,7 @@
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
 #include "KOReaderCredentialStore.h"
+#include "KOReaderDocumentId.h"
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
 #include "ProgressMapper.h"
@@ -36,6 +37,8 @@
 #include "TotoBookmarkSync.h"
 #include "TotoDurableQueue.h"
 #include "TotoReadingEvents.h"
+#include "TotoSyncScheduler.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
@@ -173,7 +176,7 @@ void EpubReaderActivity::onEnter() {
   epub->setupCacheDir();
 
   HalFile f;
-  if (Storage.openFileForRead("ERS", epub->getCachePath() + "/progress.bin", f)) {
+  if (ProgressFile::openForRead("ERS", epub->getCachePath(), f)) {
     uint8_t data[6];
     int dataSize = f.read(data, 6);
     if (dataSize == 4 || dataSize == 6) {
@@ -207,20 +210,29 @@ void EpubReaderActivity::onEnter() {
   APP_STATE.openEpubPath = epub->getPath();
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
-  TOTO_READING_EVENTS.beginBook(epub->getPath(), epub->getTitle(), epub->getAuthor());
-  if (const auto remote = TOTO_QUEUE.nextApplicableProgress(TOTO_READING_EVENTS.getBookHash())) {
+  const bool began = TOTO_READING_EVENTS.beginBook(epub->getPath(), epub->getTitle(), epub->getAuthor());
+  totoTrackingReady = began || (TOTO_READING_EVENTS.active() && !TOTO_READING_EVENTS.hasPendingProgress());
+  pendingSyncQueueError = !totoTrackingReady && TOTO_READING_EVENTS.hasPendingProgress();
+  if (const auto remote =
+          totoTrackingReady ? TOTO_QUEUE.nextApplicableProgress(TOTO_READING_EVENTS.getBookHash()) : std::nullopt) {
     const SavedProgressPosition saved{
         .xpath = remote->xpointer,
         .percentage = static_cast<float>(remote->percentage / 100.0),
     };
     const CrossPointPosition mapped =
         ProgressMapper::toCrossPoint(epub, saved, renderer, currentSpineIndex, cachedChapterTotalPageCount);
-    currentSpineIndex = mapped.spineIndex;
-    nextPageNumber = mapped.pageNumber;
-    cachedSpineIndex = mapped.spineIndex;
-    cachedChapterTotalPageCount = mapped.totalPages;
-    if (saveProgress(mapped.spineIndex, mapped.pageNumber, mapped.totalPages)) {
-      TOTO_QUEUE.resolveProgressThrough(remote->bookHash, remote->serverSequence);
+    if (mapped.spineIndex >= 0 && mapped.spineIndex < epub->getSpineItemsCount() && mapped.totalPages > 0 &&
+        saveProgress(mapped.spineIndex, mapped.pageNumber, mapped.totalPages)) {
+      currentSpineIndex = mapped.spineIndex;
+      nextPageNumber = mapped.pageNumber;
+      cachedSpineIndex = mapped.spineIndex;
+      cachedChapterTotalPageCount = mapped.totalPages;
+      pendingAppliedRemote = *remote;
+      if (TOTO_READING_EVENTS.recordPosition(saved.percentage, saved.xpath, true)) {
+        if (TOTO_QUEUE.resolveProgress(*remote)) pendingAppliedRemote.reset();
+      } else {
+        pendingSyncQueueError = true;
+      }
       LOG_INF("TOTO", "Applied durable remote progress for %s at %.1f%%", TOTO_READING_EVENTS.getBookHash().c_str(),
               remote->percentage);
     }
@@ -341,6 +353,84 @@ void EpubReaderActivity::loop() {
   if (!epub) {
     // Should never happen
     finish();
+    return;
+  }
+
+  if (millis() - lastSyncQueueRetryMs >= 10000U && !RenderLock::peek()) {
+    RenderLock lock(*this);
+    lastSyncQueueRetryMs = millis();
+    if (TOTO_READING_EVENTS.hasPendingProgress()) {
+      pendingSyncQueueError = !TOTO_READING_EVENTS.retryPendingProgress();
+      requestUpdate();
+    }
+  }
+
+  if (pendingAppliedRemote.has_value() && !TOTO_READING_EVENTS.hasPendingProgress() && !RenderLock::peek()) {
+    RenderLock lock(*this);
+    if (TOTO_QUEUE.resolveProgress(*pendingAppliedRemote)) {
+      pendingAppliedRemote.reset();
+    }
+  }
+
+  // Ask once after the first page is rendered. Declining keeps the durable
+  // location available from Toto Sync and does not require a network connection.
+  if (totoTrackingReady && !remoteDecisionChecked && lastRenderCompleteMs != 0 && section && !RenderLock::peek()) {
+    remoteDecisionChecked = true;
+    if (const auto remote = TOTO_QUEUE.nextProgressDecision(TOTO_READING_EVENTS.getBookHash())) {
+      char summary[96];
+      std::snprintf(summary, sizeof(summary), tr(STR_TOTO_RESUME_AT), remote->percentage);
+      const std::string prompt =
+          remote->sourceDeviceName.empty() ? std::string(summary) : remote->sourceDeviceName + " — " + summary;
+      auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_APPLY_REMOTE), prompt);
+      if (!confirmation) {
+        pendingSyncSaveError = true;
+        requestUpdate();
+        return;
+      }
+      startActivityForResult(std::move(confirmation), [this, remote](const ActivityResult& result) {
+        if (result.isCancelled) {
+          if (!TOTO_QUEUE.dismissProgress(*remote)) pendingSyncSaveError = true;
+          requestUpdate();
+          return;
+        }
+        const SavedProgressPosition saved{.xpath = remote->xpointer,
+                                          .percentage = static_cast<float>(remote->percentage / 100.0)};
+        // Persist consent before changing the local position. If SD queueing
+        // fails later, reopening retries this accepted intent after a reboot.
+        if (!TOTO_QUEUE.acceptProgress(*remote)) {
+          pendingSyncSaveError = true;
+          requestUpdate();
+          return;
+        }
+        const auto mapped = ProgressMapper::toCrossPoint(epub, saved, renderer, currentSpineIndex,
+                                                         section ? section->estimatedTotalPages() : 0);
+        if (mapped.spineIndex < 0 || mapped.spineIndex >= epub->getSpineItemsCount() || mapped.totalPages <= 0 ||
+            !saveProgress(mapped.spineIndex, mapped.pageNumber, mapped.totalPages)) {
+          pendingSyncSaveError = true;
+          requestUpdate();
+          return;
+        }
+        currentSpineIndex = mapped.spineIndex;
+        nextPageNumber = mapped.pageNumber;
+        cachedSpineIndex = mapped.spineIndex;
+        cachedChapterTotalPageCount = mapped.totalPages;
+        section.reset();
+        pendingAppliedRemote = *remote;
+        if (TOTO_READING_EVENTS.recordPosition(saved.percentage, saved.xpath, true)) {
+          if (TOTO_QUEUE.resolveProgress(*remote)) pendingAppliedRemote.reset();
+        } else {
+          pendingSyncQueueError = true;
+        }
+        requestUpdate();
+      });
+      return;
+    }
+  }
+
+  constexpr unsigned long AUTO_SYNC_SETTLE_MS = 5000;
+  const bool pageSettled = lastRenderCompleteMs != 0 && millis() - lastRenderCompleteMs >= AUTO_SYNC_SETTLE_MS &&
+                           !automaticPageTurnActive && footnoteDepth == 0;
+  if (TOTO_SYNC_SCHEDULER.readerSyncDue(pageSettled, section && section->isBuilding()) && launchTotoAutoSync()) {
     return;
   }
 
@@ -892,7 +982,15 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC: {
-      launchKOReaderSync();
+      launchTotoBookSync(TotoBookSyncActivity::Mode::Sync);
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::FETCH_LATEST: {
+      launchTotoBookSync(TotoBookSyncActivity::Mode::Latest);
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::FETCH_OTHER: {
+      launchTotoBookSync(TotoBookSyncActivity::Mode::LatestOther);
       break;
     }
     case EpubReaderMenuActivity::MenuAction::BOOKMARKS: {
@@ -958,6 +1056,83 @@ bool EpubReaderActivity::launchKOReaderSync() {
       renderer, mappedInput, savedEpubPath, currentSpineIndex, currentPage, totalPages, std::move(localKoPos),
       std::move(localChapterName), paragraphIndex));
   return true;  // acted: launched the sync activity
+}
+
+bool EpubReaderActivity::launchTotoBookSync(TotoBookSyncActivity::Mode mode) {
+  if (!epub) return false;
+  const int page = section ? section->currentPage : nextPageNumber;
+  const int pages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
+  const std::string path = epub->getPath();
+  // A failed beginBook may leave the tracker holding an older book's retry.
+  // Explicit recovery must always identify the EPUB actually open on screen.
+  const std::string hash = KOReaderDocumentId::calculate(path);
+  if (hash.empty()) {
+    pendingSyncSaveError = true;
+    requestUpdate();
+    return false;
+  }
+  if (!saveProgress(currentSpineIndex, page, pages)) {
+    pendingSyncSaveError = true;
+    requestUpdate();
+    return false;
+  }
+  auto activity = makeUniqueNoThrow<TotoBookSyncActivity>(renderer, mappedInput, path, hash, mode);
+  if (!activity) {
+    pendingSyncSaveError = true;
+    requestUpdate();
+    return false;
+  }
+  // Do not synthesize a new reading timestamp merely because Sync was pressed.
+  if (!TOTO_READING_EVENTS.retryPendingProgress() || !TOTO_READING_EVENTS.endBook()) {
+    pendingSyncQueueError = true;
+    requestUpdate();
+    return false;
+  }
+  {
+    RenderLock lock(*this);
+    ImageBlock::setExtractor(nullptr, nullptr);
+    section.reset();
+    epub.reset();
+  }
+  activityManager.replaceActivity(std::move(activity));
+  return true;
+}
+
+bool EpubReaderActivity::launchTotoAutoSync() {
+  if (!epub) return false;
+
+  const int currentPage = section ? section->currentPage : nextPageNumber;
+  const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
+  const std::string savedEpubPath = epub->getPath();
+  if (!saveProgress(currentSpineIndex, currentPage, totalPages)) {
+    LOG_ERR("TOTO", "Deferring automatic sync because current progress could not be saved");
+    pendingSyncSaveError = true;
+    requestUpdate();
+    return false;
+  }
+
+  if (!TOTO_READING_EVENTS.retryPendingProgress()) {
+    pendingSyncQueueError = true;
+    requestUpdate();
+    return false;
+  }
+
+  // ESP32-C3 has no PSRAM. Release the EPUB/layout objects before wolfSSL just
+  // like the physically verified manual sync path, then reopen the same book.
+  // The outbox was committed before this point and survives any network error
+  // or reboot; a successful pull is applied from the durable inbox on re-entry.
+  LOG_INF("TOTO", "Starting automatic reader sync (heap before release: %u)", (unsigned)ESP.getFreeHeap());
+  TOTO_READING_EVENTS.endBook();
+  {
+    RenderLock lock(*this);
+    ImageBlock::setExtractor(nullptr, nullptr);
+    section.reset();
+    epub.reset();
+  }
+  LOG_DBG("TOTO", "Reader released for automatic sync (heap: %u)", (unsigned)ESP.getFreeHeap());
+  TOTO_SYNC_SCHEDULER.syncNow(4);
+  activityManager.goToReader(savedEpubPath);
+  return true;
 }
 
 void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
@@ -1055,6 +1230,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   }
 
   const auto showPendingSyncSaveError = [this]() {
+    if (pendingSyncQueueError) {
+      pendingSyncQueueError = false;
+      GUI.drawPopup(renderer, tr(STR_SYNC_QUEUE_SAVE_FAILED));
+      return;
+    }
     if (!pendingSyncSaveError) return;
     pendingSyncSaveError = false;
     GUI.drawPopup(renderer, tr(STR_SAVE_PROGRESS_FAILED));
@@ -1434,7 +1614,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       lastSavedPage = section->currentPage;
       lastSavedPageCount = section->estimatedTotalPages();
       const SavedProgressPosition totoPosition = ProgressMapper::toSavedProgress(epub, getCurrentPosition());
-      TOTO_READING_EVENTS.recordPosition(totoPosition.percentage, totoPosition.xpath);
+      if (totoTrackingReady && !TOTO_READING_EVENTS.recordPosition(totoPosition.percentage, totoPosition.xpath)) {
+        pendingSyncQueueError = true;
+      }
     }
   }
 

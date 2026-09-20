@@ -16,8 +16,10 @@ class ReadingEvents {
   static ReadingEvents& instance();
 
   bool beginBook(const std::string& epubPath, std::string title, std::string author);
-  void recordPosition(float percentage, const std::string& xpointer, bool explicitJump = false);
-  void endBook();
+  bool recordPosition(float percentage, const std::string& xpointer, bool explicitJump = false);
+  bool endBook();
+  bool retryPendingProgress();
+  bool hasPendingProgress() const { return progressPending; }
   bool active() const { return !bookHash.empty(); }
   const std::string& getBookHash() const { return bookHash; }
   uint32_t getBootId() const { return bootId; }
@@ -47,6 +49,12 @@ class ReadingEvents {
   uint32_t currentPage = 0;
   uint32_t pagesRead = 0;
   bool havePage = false;
+  std::array<char, 512> lastObservedXpointer{};
+  size_t lastObservedXpointerSize = 0;
+  bool progressPending = false;
+  float pendingPercentage = 0;
+  bool pendingExplicitJump = false;
+  ResolvedTime pendingProgressTime;
   EventIdentity progressIdentity;
   EventIdentity pageStatsIdentity;
   std::array<PageRow, PAGE_ROWS_PER_EVENT> pageRows{};
@@ -55,7 +63,7 @@ class ReadingEvents {
 
   ResolvedTime now() const;
   bool enqueueStarted();
-  bool persistProgress(float percentage, const std::string& xpointer, bool explicitJump);
+  bool persistProgress(float percentage, const std::string& xpointer, bool explicitJump, ResolvedTime occurredAt);
   void finishCurrentPage();
   bool persistPageStats();
   void persistEnded(uint32_t totalDurationSeconds);

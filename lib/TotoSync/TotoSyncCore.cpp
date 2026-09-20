@@ -287,8 +287,21 @@ ProgressDirective parseProgressDirective(std::string_view value) {
 }
 
 bool shouldAutoApply(ProgressDirective directive) {
-  return directive == ProgressDirective::APPLY_INITIAL || directive == ProgressDirective::MERGE_FORWARD ||
-         directive == ProgressDirective::EQUIVALENT;
+  // The server can recommend a location, but only the reader may authorize a jump.
+  (void)directive;
+  return false;
+}
+
+bool mayUploadAfterPull(bool succeeded, bool hasMore) { return succeeded && !hasMore; }
+
+bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs) {
+  return deadlineMs != 0 && static_cast<int32_t>(nowMs - deadlineMs) >= 0;
+}
+
+bool readerSyncWindowReady(uint32_t nowMs, uint32_t nextAttemptMs, uint32_t lastSuccessMs, bool pageSettled,
+                           bool buildActive) {
+  if (!pageSettled || buildActive || !deadlineReached(nowMs, nextAttemptMs)) return false;
+  return lastSuccessMs == 0 || static_cast<uint32_t>(nowMs - lastSuccessMs) >= READER_SYNC_COOLDOWN_MS;
 }
 
 std::string boundedUtf8(std::string_view value, size_t maxBytes) {

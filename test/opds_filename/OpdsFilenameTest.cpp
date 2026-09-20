@@ -50,3 +50,21 @@ TEST(OpdsFilename, UnknownFormatValueFallsBackToAuthorTitle) {
 }
 
 }  // namespace
+
+TEST(OpdsFilename, CanonicalEditionsWithSameTitleHaveDistinctPaths) {
+  const auto first = cinabrioBookFilename("Author", "Book", OpdsFilenameFormat::AuthorTitle,
+                                          "/api/opds/books/11111111-1111-4111-8111-111111111111/file.epub");
+  const auto second = cinabrioBookFilename("Author", "Book", OpdsFilenameFormat::AuthorTitle,
+                                           "/api/opds/books/22222222-2222-4222-8222-222222222222/file.epub");
+  EXPECT_NE(first, second);
+  EXPECT_TRUE(first.starts_with("Author - Book ["));
+  EXPECT_TRUE(first.ends_with("].epub"));
+}
+
+TEST(OpdsFilename, UntrustedOrNoncanonicalAcquisitionDoesNotBecomeAPath) {
+  EXPECT_EQ(cinabrioBookFilename("", "Book", OpdsFilenameFormat::TitleOnly, "/api/opds/books/../../../secret.epub"),
+            "Book.epub");
+  EXPECT_EQ(
+      cinabrioBookFilename("", "Book", OpdsFilenameFormat::TitleOnly, "https://catalog.example/download/123.epub"),
+      "Book.epub");
+}

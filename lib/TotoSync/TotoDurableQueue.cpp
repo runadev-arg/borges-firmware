@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <limits>
 #include <utility>
@@ -20,6 +21,13 @@ constexpr char OUTBOX_DIR[] = "/.crosspoint/toto/outbox";
 constexpr char INBOX_DIR[] = "/.crosspoint/toto/inbox";
 constexpr char CHECKPOINT_A[] = "/.crosspoint/toto/checkpoint-a.bin";
 constexpr char CHECKPOINT_B[] = "/.crosspoint/toto/checkpoint-b.bin";
+
+bool validBookHash(std::string_view hash) {
+  return hash.size() == 32 &&
+         std::all_of(hash.begin(), hash.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
+std::string recoveryFilename(std::string_view bookHash) { return "recovery_" + std::string(bookHash) + ".json"; }
 
 std::vector<uint8_t> readCheckpointFile(const char* path) {
   HalFile file;
@@ -216,28 +224,90 @@ bool DurableQueue::deferPulled(uint64_t serverSequence, const std::string& event
   std::string acceptedPath = path;
   acceptedPath.replace(acceptedPath.size() - 5, 5, ".accepted");
   if (Storage.exists(acceptedPath.c_str())) return true;
+  std::string dismissedPath = path;
+  dismissedPath.replace(dismissedPath.size() - 5, 5, ".dismissed");
+  if (Storage.exists(dismissedPath.c_str())) return true;
   if (Storage.exists(path.c_str())) return true;
   return writeAtomic(path, reinterpret_cast<const uint8_t*>(eventJson.data()), eventJson.size());
 }
 
-std::optional<ProgressInboxItem> DurableQueue::nextProgressDecision() const {
+bool DurableQueue::restoreProgressCandidate(std::string_view bookHash, const std::string& eventJson) {
+  if ((!initialized && !begin()) || !validBookHash(bookHash) || eventJson.empty() ||
+      eventJson.size() > MAX_INBOX_EVENT_BYTES)
+    return false;
+  JsonDocument event;
+  if (deserializeJson(event, eventJson) || !event.is<JsonObject>() ||
+      std::string(event["event_type"] | "") != "progress.changed" ||
+      std::string(event["book_identifier"]["kind"] | "") != "koreader_partial_md5" ||
+      std::string(event["book_identifier"]["value"] | "") != bookHash)
+    return false;
+  const auto source = event["directive_metadata"]["source"].as<JsonObjectConst>();
+  const auto payload = event["payload"].as<JsonObjectConst>();
+  const auto percentage = source["percentage"].isNull() ? payload["percentage"] : source["percentage"];
+  if (!percentage.is<double>() || !std::isfinite(percentage.as<double>()) || percentage.as<double>() < 0 ||
+      percentage.as<double>() > 100)
+    return false;
+
+  std::array<uint8_t, 16> random{};
+  esp_fill_random(random.data(), random.size());
+  JsonObject local = event["local_recovery"].to<JsonObject>();
+  local["request_id"] = formatUuidV4(random);
+  local["decision"] = "pending";
+  // A deliberate recovery request must be offered even when the stream once
+  // classified the same position as own, equivalent, or already dismissed.
+  event["directive"] = "suggest_resume";
+  std::string serialized;
+  serializeJson(event, serialized);
+  if (event.overflowed() || serialized.size() > MAX_INBOX_EVENT_BYTES) return false;
+  const std::string path = std::string(INBOX_DIR) + "/" + recoveryFilename(bookHash);
+  return writeAtomic(path, reinterpret_cast<const uint8_t*>(serialized.data()), serialized.size());
+}
+
+std::optional<ProgressInboxItem> DurableQueue::nextProgressDecision(std::string_view bookHash,
+                                                                    bool includeDismissed) const {
+  uint64_t acceptedByManual = 0;
+  if (validBookHash(bookHash)) {
+    if (const auto manual = readProgressInbox(recoveryFilename(bookHash))) {
+      if (manual->accepted) return std::nullopt;
+      if (!manual->dismissed || includeDismissed) return manual;
+      acceptedByManual = manual->supersedingStreamSequence;
+    }
+  }
   std::optional<ProgressInboxItem> newest;
   for (const String& filename : Storage.listFiles(INBOX_DIR, MAX_QUEUE_SCAN)) {
     const auto item = readProgressInbox(filename.c_str());
-    if (!item || item->accepted || (item->directive != "suggest_resume" && item->directive != "suggest_jump")) {
+    if (!item || item->accepted || (acceptedByManual != 0 && item->serverSequence == acceptedByManual) ||
+        (!bookHash.empty() && item->bookHash != bookHash) || (item->dismissed && !includeDismissed) ||
+        item->directive == "own" || item->directive == "equivalent" || item->directive == "keep_local")
       continue;
-    }
-    if (!newest || item->serverSequence > newest->serverSequence) newest = item;
+    if (!newest || (item->manualRecovery && !newest->manualRecovery) ||
+        (item->manualRecovery == newest->manualRecovery && item->serverSequence > newest->serverSequence))
+      newest = item;
   }
   return newest;
 }
 
 std::optional<ProgressInboxItem> DurableQueue::nextApplicableProgress(std::string_view bookHash) const {
+  if (validBookHash(bookHash)) {
+    if (const auto manual = readProgressInbox(recoveryFilename(bookHash))) {
+      // A new manual request supersedes old consent for this book. It must not
+      // accidentally activate an older .accepted stream entry before review.
+      if (manual->accepted) return manual;
+      if (manual->supersedingStreamSequence != 0) {
+        auto chosen = readStreamProgress(manual->supersedingStreamSequence);
+        if (chosen && chosen->bookHash == bookHash) {
+          chosen->accepted = true;
+          return chosen;
+        }
+      }
+      return std::nullopt;
+    }
+  }
   std::optional<ProgressInboxItem> newest;
   for (const String& filename : Storage.listFiles(INBOX_DIR, MAX_QUEUE_SCAN)) {
     const auto item = readProgressInbox(filename.c_str());
     if (!item || item->bookHash != bookHash) continue;
-    const bool safe = item->accepted || item->directive == "apply_initial" || item->directive == "merge_forward";
+    const bool safe = item->accepted || shouldAutoApply(parseProgressDirective(item->directive));
     if (safe && (!newest || item->serverSequence > newest->serverSequence)) newest = item;
   }
   return newest;
@@ -255,6 +325,21 @@ std::optional<AnnotationInboxItem> DurableQueue::nextAnnotation(std::string_view
 }
 
 bool DurableQueue::acceptProgress(const ProgressInboxItem& item) {
+  if (item.manualRecovery) {
+    if (!validBookHash(item.bookHash)) return false;
+    const auto stored = readProgressInbox(recoveryFilename(item.bookHash));
+    if (!stored || stored->recoveryRequestId != item.recoveryRequestId) return false;
+    return setRecoveryDecision(item, "accepted");
+  }
+  if (validBookHash(item.bookHash)) {
+    if (const auto manual = readProgressInbox(recoveryFilename(item.bookHash))) {
+      const auto chosen = readStreamProgress(item.serverSequence);
+      if (!chosen || chosen->bookHash != item.bookHash) return false;
+      // Consent and the exact chosen stream sequence commit in one file. Never
+      // reactivate unrelated old .accepted entries hidden beyond a directory scan.
+      return setRecoveryDecision(*manual, "superseded", item.serverSequence);
+    }
+  }
   const uint64_t serverSequence = item.serverSequence;
   std::array<char, 72> source{};
   std::array<char, 72> target{};
@@ -262,19 +347,97 @@ bool DurableQueue::acceptProgress(const ProgressInboxItem& item) {
                 static_cast<unsigned long long>(serverSequence));
   std::snprintf(target.data(), target.size(), "%s/%020llu.accepted", INBOX_DIR,
                 static_cast<unsigned long long>(serverSequence));
+  if (item.dismissed) {
+    std::snprintf(source.data(), source.size(), "%s/%020llu.dismissed", INBOX_DIR,
+                  static_cast<unsigned long long>(serverSequence));
+  }
   const bool accepted = Storage.exists(target.data()) || Storage.rename(source.data(), target.data());
   if (!accepted) return false;
 
   bool removed = true;
   for (const String& filename : Storage.listFiles(INBOX_DIR, MAX_QUEUE_SCAN)) {
     const auto candidate = readProgressInbox(filename.c_str());
-    if (!candidate || candidate->bookHash != item.bookHash || candidate->serverSequence >= serverSequence) continue;
+    if (!candidate || candidate->manualRecovery || candidate->bookHash != item.bookHash ||
+        candidate->serverSequence >= serverSequence)
+      continue;
     removed = removeInboxFile(candidate->serverSequence) && removed;
   }
   return removed;
 }
 
+bool DurableQueue::dismissProgress(const ProgressInboxItem& item) {
+  if (item.manualRecovery) {
+    if (!validBookHash(item.bookHash)) return false;
+    const auto stored = readProgressInbox(recoveryFilename(item.bookHash));
+    if (!stored || stored->recoveryRequestId != item.recoveryRequestId) return false;
+    return setRecoveryDecision(item, "dismissed");
+  }
+  std::array<char, 72> source{}, target{};
+  std::snprintf(source.data(), source.size(), "%s/%020llu.json", INBOX_DIR,
+                static_cast<unsigned long long>(item.serverSequence));
+  if (item.accepted) {
+    std::snprintf(source.data(), source.size(), "%s/%020llu.accepted", INBOX_DIR,
+                  static_cast<unsigned long long>(item.serverSequence));
+  }
+  std::snprintf(target.data(), target.size(), "%s/%020llu.dismissed", INBOX_DIR,
+                static_cast<unsigned long long>(item.serverSequence));
+  if (Storage.exists(target.data())) {
+    return !Storage.exists(source.data()) || Storage.remove(source.data());
+  }
+  return Storage.rename(source.data(), target.data());
+}
+
+std::optional<ProgressInboxItem> DurableQueue::readStreamProgress(uint64_t serverSequence) {
+  if (serverSequence == 0) return std::nullopt;
+  for (const char* suffix : {"accepted", "json", "dismissed"}) {
+    std::array<char, 40> filename{};
+    std::snprintf(filename.data(), filename.size(), "%020llu.%s", static_cast<unsigned long long>(serverSequence),
+                  suffix);
+    if (const auto item = readProgressInbox(filename.data())) return item;
+  }
+  return std::nullopt;
+}
+
 bool DurableQueue::resolveProgress(uint64_t serverSequence) { return removeInboxFile(serverSequence); }
+
+bool DurableQueue::setRecoveryDecision(const ProgressInboxItem& item, const char* decision, uint64_t streamSequence) {
+  if (!item.manualRecovery || !validBookHash(item.bookHash) || !isUuid(item.recoveryRequestId)) return false;
+  const std::string path = std::string(INBOX_DIR) + "/" + recoveryFilename(item.bookHash);
+  recoverAtomic(path);
+  const String body = Storage.readFile(path.c_str());
+  if (body.isEmpty() || body.length() > MAX_INBOX_EVENT_BYTES) return false;
+  JsonDocument event;
+  if (deserializeJson(event, body.c_str()) ||
+      std::string(event["local_recovery"]["request_id"] | "") != item.recoveryRequestId)
+    return false;
+  event["local_recovery"]["decision"] = decision;
+  if (streamSequence != 0)
+    event["local_recovery"]["stream_sequence"] = std::to_string(streamSequence);
+  else
+    event["local_recovery"].remove("stream_sequence");
+  std::string serialized;
+  serializeJson(event, serialized);
+  if (event.overflowed() || serialized.size() > MAX_INBOX_EVENT_BYTES) return false;
+  return writeAtomic(path, reinterpret_cast<const uint8_t*>(serialized.data()), serialized.size());
+}
+
+bool DurableQueue::resolveProgress(const ProgressInboxItem& item) {
+  if (!item.manualRecovery) {
+    if (item.serverSequence == 0 || !validBookHash(item.bookHash)) return false;
+    const auto stored = readStreamProgress(item.serverSequence);
+    if (stored && stored->bookHash != item.bookHash) return false;
+    if (!removeInboxFile(item.serverSequence)) return false;
+    return resolveProgressThrough(item.bookHash, item.serverSequence);
+  }
+  if (!validBookHash(item.bookHash) || !isUuid(item.recoveryRequestId)) return false;
+  const auto stored = readProgressInbox(recoveryFilename(item.bookHash));
+  if (!stored || stored->recoveryRequestId != item.recoveryRequestId) return false;
+  if (stored->recoveryResolved) return true;
+  if (!stored->accepted) return false;
+  // Keep a durable barrier against old consent, and retain the location for
+  // manual recovery. Future stream suggestions still require a fresh choice.
+  return setRecoveryDecision(item, "resolved");
+}
 
 bool DurableQueue::resolveInbox(uint64_t serverSequence) { return removeInboxFile(serverSequence); }
 
@@ -282,7 +445,7 @@ bool DurableQueue::resolveProgressThrough(std::string_view bookHash, uint64_t se
   bool removed = true;
   for (const String& filename : Storage.listFiles(INBOX_DIR, MAX_QUEUE_SCAN)) {
     const auto item = readProgressInbox(filename.c_str());
-    if (!item || item->bookHash != bookHash || item->serverSequence > serverSequence) continue;
+    if (!item || item->manualRecovery || item->bookHash != bookHash || item->serverSequence > serverSequence) continue;
     removed = removeInboxFile(item->serverSequence) && removed;
   }
   return removed;
@@ -387,20 +550,25 @@ bool DurableQueue::parseFilename(std::string_view filename, uint64_t& sequence, 
 }
 
 std::optional<ProgressInboxItem> DurableQueue::readProgressInbox(std::string_view filename) {
+  const bool manual = filename.starts_with("recovery_") && filename.ends_with(".json") && filename.size() == 46 &&
+                      validBookHash(filename.substr(9, 32));
   const bool accepted = filename.ends_with(".accepted");
-  if (!accepted && !filename.ends_with(".json")) return std::nullopt;
+  const bool dismissed = filename.ends_with(".dismissed");
+  if (!accepted && !dismissed && !filename.ends_with(".json")) return std::nullopt;
   if (filename.size() < 20) return std::nullopt;
   uint64_t serverSequence = 0;
-  const auto parsed = std::from_chars(filename.data(), filename.data() + 20, serverSequence);
-  if (parsed.ec != std::errc{} || parsed.ptr != filename.data() + 20 || serverSequence == 0) {
-    return std::nullopt;
+  if (!manual) {
+    const auto parsed = std::from_chars(filename.data(), filename.data() + 20, serverSequence);
+    if (parsed.ec != std::errc{} || parsed.ptr != filename.data() + 20 || serverSequence == 0) return std::nullopt;
   }
 
   const std::string path = std::string(INBOX_DIR) + "/" + std::string(filename);
-  const String body = Storage.readFile(path.c_str());
+  // Direct lookup must also recover a manual record when an interrupted
+  // replacement left only its backup, even beyond the bounded directory scan.
+  const String body = Storage.readFile((manual && !Storage.exists(path.c_str()) ? path + ".bak" : path).c_str());
   if (body.isEmpty() || body.length() > MAX_INBOX_EVENT_BYTES) return std::nullopt;
   JsonDocument event;
-  if (deserializeJson(event, body) || std::string(event["event_type"] | "") != "progress.changed") {
+  if (deserializeJson(event, body.c_str()) || std::string(event["event_type"] | "") != "progress.changed") {
     return std::nullopt;
   }
 
@@ -408,6 +576,7 @@ std::optional<ProgressInboxItem> DurableQueue::readProgressInbox(std::string_vie
   item.serverSequence = serverSequence;
   item.directive = event["directive"] | "";
   item.suggestionId = event["directive_metadata"]["suggestion"]["id"] | "";
+  item.sourceDeviceName = boundedUtf8(event["origin_device"]["name"] | "", 80);
   item.bookHash = event["book_identifier"]["value"] | "";
   const JsonObjectConst source = event["directive_metadata"]["source"].as<JsonObjectConst>();
   const JsonObjectConst payload = event["payload"].as<JsonObjectConst>();
@@ -419,7 +588,26 @@ std::optional<ProgressInboxItem> DurableQueue::readProgressInbox(std::string_vie
   item.xpointer =
       source["xpointer"].isNull() ? std::string(payload["xpointer"] | "") : source["xpointer"].as<std::string>();
   item.accepted = accepted;
-  if (item.bookHash.size() != 32 || item.percentage < 0 || item.percentage > 100) return std::nullopt;
+  item.dismissed = dismissed;
+  item.manualRecovery = manual;
+  if (manual) {
+    item.recoveryRequestId = event["local_recovery"]["request_id"] | "";
+    const std::string decision = event["local_recovery"]["decision"] | "";
+    if (!isUuid(item.recoveryRequestId) || item.bookHash != filename.substr(9, 32) ||
+        (decision != "pending" && decision != "accepted" && decision != "dismissed" && decision != "resolved" &&
+         decision != "superseded"))
+      return std::nullopt;
+    item.accepted = decision == "accepted";
+    item.dismissed = decision == "dismissed" || decision == "resolved" || decision == "superseded";
+    item.recoveryResolved = decision == "resolved";
+    if (decision == "superseded") {
+      const auto sequence = decimalSequence(event["local_recovery"]["stream_sequence"] | "");
+      if (!sequence || *sequence == 0) return std::nullopt;
+      item.supersedingStreamSequence = *sequence;
+    }
+  }
+  if (item.bookHash.size() != 32 || !std::isfinite(item.percentage) || item.percentage < 0 || item.percentage > 100)
+    return std::nullopt;
   return item;
 }
 
@@ -435,7 +623,7 @@ std::optional<AnnotationInboxItem> DurableQueue::readAnnotationInbox(std::string
   const String body = Storage.readFile(path.c_str());
   if (body.isEmpty() || body.length() > MAX_INBOX_EVENT_BYTES) return std::nullopt;
   JsonDocument event;
-  if (deserializeJson(event, body)) return std::nullopt;
+  if (deserializeJson(event, body.c_str())) return std::nullopt;
   const std::string eventType = event["event_type"] | "";
   if (eventType.rfind("annotation.", 0) != 0 && eventType.rfind("bookmark.", 0) != 0) {
     return std::nullopt;

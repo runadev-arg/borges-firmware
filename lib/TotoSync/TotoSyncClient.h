@@ -32,9 +32,19 @@ class SyncClient {
     bool hasMore = false;
   };
 
+  struct RecoveryOutcome {
+    Result result = Result::INVALID_RESPONSE;
+    bool found = false;
+    int httpCode = 0;
+  };
+
   static Outcome syncOnce();
+  static RecoveryOutcome fetchProgress(const std::string& bookHash, bool otherDeviceOnly);
   static Result resolveSuggestion(const std::string& suggestionId, bool accept);
   static const char* resultName(Result result);
+
+ private:
+  static Outcome syncStep(bool allowUpload);
 };
 
 }  // namespace toto

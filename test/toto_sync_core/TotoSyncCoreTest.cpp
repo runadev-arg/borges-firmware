@@ -98,12 +98,27 @@ TEST(TotoAcknowledgment, RequiresExactIdAndDecimalSequence) {
   EXPECT_FALSE(toto::acknowledgmentMatches("event", 42, "event", "42x"));
 }
 
-TEST(TotoProgress, OnlySafeDirectivesAutoApply) {
-  EXPECT_TRUE(toto::shouldAutoApply(toto::parseProgressDirective("apply_initial")));
-  EXPECT_TRUE(toto::shouldAutoApply(toto::parseProgressDirective("merge_forward")));
-  EXPECT_FALSE(toto::shouldAutoApply(toto::parseProgressDirective("keep_local")));
+TEST(TotoProgress, EveryRemotePositionRequiresUserConsent) {
+  EXPECT_FALSE(toto::shouldAutoApply(toto::parseProgressDirective("apply_initial")));
+  EXPECT_FALSE(toto::shouldAutoApply(toto::parseProgressDirective("merge_forward")));
+  EXPECT_FALSE(toto::shouldAutoApply(toto::parseProgressDirective("equivalent")));
   EXPECT_FALSE(toto::shouldAutoApply(toto::parseProgressDirective("suggest_resume")));
+  EXPECT_FALSE(toto::shouldAutoApply(toto::parseProgressDirective("keep_local")));
+  EXPECT_FALSE(toto::shouldAutoApply(toto::parseProgressDirective("suggest_jump")));
   EXPECT_EQ(toto::parseProgressDirective("future_value"), toto::ProgressDirective::UNKNOWN);
+}
+
+TEST(TotoScheduler, ReaderWindowDebouncesAndHonorsCooldownAcrossMillisWrap) {
+  EXPECT_FALSE(toto::readerSyncWindowReady(10'000, 9'000, 0, false, false));
+  EXPECT_FALSE(toto::readerSyncWindowReady(10'000, 9'000, 0, true, true));
+  EXPECT_TRUE(toto::readerSyncWindowReady(10'000, 9'000, 0, true, false));
+  EXPECT_FALSE(toto::readerSyncWindowReady(10'000, 11'000, 0, true, false));
+  EXPECT_FALSE(toto::readerSyncWindowReady(100'000, 90'000, 99'000, true, false));
+  EXPECT_TRUE(toto::readerSyncWindowReady(300'000, 90'000, 100'000, true, false));
+
+  constexpr uint32_t nearWrap = 0xfffffff0U;
+  EXPECT_FALSE(toto::deadlineReached(nearWrap, 0x00000010U));
+  EXPECT_TRUE(toto::deadlineReached(0x00000020U, 0x00000010U));
 }
 
 TEST(TotoAnnotations, BoundsUtf8AndBuildsStableIdentities) {
@@ -123,3 +138,10 @@ TEST(TotoAnnotations, BoundsUtf8AndBuildsStableIdentities) {
 }
 
 }  // namespace
+
+TEST(TotoProgress, FailedOrIncompletePullNeverPermitsAnUpload) {
+  EXPECT_FALSE(toto::mayUploadAfterPull(false, false));
+  EXPECT_FALSE(toto::mayUploadAfterPull(false, true));
+  EXPECT_FALSE(toto::mayUploadAfterPull(true, true));
+  EXPECT_TRUE(toto::mayUploadAfterPull(true, false));
+}

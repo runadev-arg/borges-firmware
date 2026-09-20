@@ -68,7 +68,9 @@ class KOReaderSyncClient {
     JSON_ERROR,
     NOT_FOUND,
     LOW_MEMORY,
-    USER_EXISTS
+    USER_EXISTS,
+    ACCESS_DENIED,
+    INVALID_REQUEST
   };
 
   /**
@@ -107,4 +109,12 @@ class KOReaderSyncClient {
 
   /** HTTP status code from the last request (for diagnostics). */
   static int lastHttpCode;
+  /** Numeric KOSync protocol code (2000..2005), or 0 when absent. */
+  static int lastProtocolCode;
+  /** Bounded server correlation id. Contains no credential material. */
+  static std::string lastRequestId;
+  /** Endpoint name only (never the URL/query or auth headers). */
+  static std::string lastEndpoint;
+  /** Bounded transport-stage detail from SecureHttpClient. */
+  static std::string lastTransportError;
 };

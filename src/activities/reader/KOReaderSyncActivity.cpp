@@ -153,7 +153,6 @@ void KOReaderSyncActivity::performSync() {
     requestUpdate(true);
     return;
   }
-  const std::string primaryHash = documentHash;
 
   LOG_DBG("KOSync", "Document hash (%s): %s", matchMethodName(primaryMethod), documentHash.c_str());
 
@@ -172,7 +171,7 @@ void KOReaderSyncActivity::performSync() {
           matchMethodName(primaryMethod), result, KOReaderSyncClient::lastHttpCode, documentHash.c_str(),
           localProgress.percentage, remoteProgress.percentage, remoteProgress.progress.c_str());
 
-  if (smartSyncEnabled()) {
+  if (smartSyncEnabled() && result == KOReaderSyncClient::NOT_FOUND) {
     const DocumentMatchMethod altMethod = alternateMatchMethod(primaryMethod);
     const std::string altHash = calculateDocumentHashForMethod(epubPath, altMethod);
     if (!altHash.empty() && altHash != documentHash) {
@@ -257,16 +256,8 @@ void KOReaderSyncActivity::performSync() {
       return;
     }
 
-    if (delta > 0) {
-      // Alternate hashes are only probes for newer remote state. Keep uploads
-      // on the user's configured matching method so its primary record heals.
-      documentHash = primaryHash;
-      performUpload();
-      return;
-    }
-
-    saveProgressAndReturn(remotePosition.spineIndex, remotePosition.pageNumber);
-    return;
+    // Different positions always need a choice, including backward rereading.
+    // A larger percentage is not evidence of a more recent reading session.
   }
 
   // localProgress was pre-computed in EpubReaderActivity before the Epub was released.
@@ -274,12 +265,7 @@ void KOReaderSyncActivity::performSync() {
     RenderLock lock(*this);
     state = SHOWING_RESULT;
 
-    // Default to the option that corresponds to the furthest progress
-    if (localProgress.percentage > remoteProgress.percentage) {
-      selectedOption = 1;  // Upload local progress
-    } else {
-      selectedOption = 0;  // Apply remote progress
-    }
+    selectedOption = 0;  // Compare the remote location; Back keeps the local page.
   }
   requestUpdate(true);
 }

@@ -212,6 +212,11 @@ void enterDeepSleep(bool fromTimeout = false) {
   deepSleepInProgress = true;
   activityManager.goToSleep(fromTimeout);
 
+  // onExit() has now persisted the last page/session into the durable outbox.
+  // Make one bounded best-effort exchange before powering the modem down; a
+  // failure leaves the queue intact for the next reader/WiFi reconnect.
+  TOTO_SYNC_SCHEDULER.flushBeforeSleep();
+
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
   }
@@ -316,6 +321,12 @@ void setup() {
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
   TOTO_CREDENTIALS.loadFromFile();
+  // Pairing owns the Cinabrio integrations. Repair a missing/stale OPDS or
+  // KOSync entry after an upgrade or credential rotation, but the bootstrap is
+  // idempotent and does not write the SD when all fields already match.
+  if (TOTO_CREDENTIALS.paired() && !toto::bootstrapCrossPointServices()) {
+    LOG_ERR("TOTO", "Could not repair paired Cinabrio services at boot");
+  }
   TOTO_QUEUE.begin();
   if (TOTO_QUEUE.depth() > 0) TOTO_SYNC_SCHEDULER.notifyLifecycleCommit();
   UITheme::getInstance().reload();

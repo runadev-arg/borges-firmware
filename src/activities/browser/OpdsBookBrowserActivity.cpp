@@ -9,6 +9,7 @@
 #include <WiFi.h>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -369,8 +370,26 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   filename.reserve(96);
   if (haveFolder) filename += folder;
   filename += '/';
-  filename += opdsBookFilename(book.author, book.title, static_cast<OpdsFilenameFormat>(SETTINGS.opdsFilenameFormat));
+  filename += cinabrioBookFilename(book.author, book.title,
+                                   static_cast<OpdsFilenameFormat>(SETTINGS.opdsFilenameFormat), book.href);
   LOG_DBG("OPDS", "Downloading: %s -> %s", downloadUrl.c_str(), filename.c_str());
+
+  // A completed canonical file is immutable. Reopening it preserves progress,
+  // annotations and the section cache, and needs no second network download.
+  if (filename.ends_with("].epub") && book.href.find("/api/opds/books/") != std::string::npos &&
+      Storage.exists(filename.c_str())) {
+    APP_STATE.openEpubPath = filename;
+    APP_STATE.readerActivityLoadCount = 0;
+    APP_STATE.lastSleepFromReader = false;
+    if (APP_STATE.saveToFile()) {
+      silentRestartToReader();
+      return;
+    }
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_BOOK_DOWNLOADED_OPEN_FAILED);
+    requestUpdate();
+    return;
+  }
 
   int lastRenderedPercent = -1;
   unsigned long lastProgressUpdateMs = 0;
@@ -393,7 +412,18 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
 
   if (result == HttpDownloader::OK) {
     clearBookCache(filename);
-    state = BrowserState::BROWSING;
+    APP_STATE.openEpubPath = filename;
+    APP_STATE.readerActivityLoadCount = 0;
+    APP_STATE.lastSleepFromReader = false;
+    if (APP_STATE.saveToFile()) {
+      // Wi-Fi/TLS fragments the small ESP32-C3 heap. Reboot silently and route
+      // straight into the freshly downloaded EPUB with a clean heap.
+      silentRestartToReader();
+      return;
+    }
+    LOG_ERR("OPDS", "Book downloaded but reader destination could not be persisted");
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_BOOK_DOWNLOADED_OPEN_FAILED);
   } else {
     LOG_ERR("OPDS", "Download failed: %d", static_cast<int>(result));
     state = BrowserState::ERROR;

@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Memory.h>
+#include <WiFi.h>
 
 #include <optional>
 
@@ -11,13 +12,48 @@
 #include "Epub.h"
 #include "EpubReaderActivity.h"
 #include "SdCardFontSystem.h"
+#include "TotoCredentialStore.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
+#include "WifiCredentialStore.h"
 #include "Xtc.h"
 #include "XtcReaderActivity.h"
 #include "activities/util/BmpViewerActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
+
+namespace {
+
+void reconnectSavedWifiForToto() {
+  if (!TOTO_CREDENTIALS.paired() || WiFi.status() == WL_CONNECTED) return;
+  if (!WIFI_STORE.loadFromFile()) {
+    LOG_DBG("TOTO", "No saved WiFi store available for reader auto-sync");
+    return;
+  }
+  const std::string& ssid = WIFI_STORE.getLastConnectedSsid();
+  const WifiCredential* credential = WIFI_STORE.findCredential(ssid);
+  if (ssid.empty() || credential == nullptr) {
+    LOG_DBG("TOTO", "No last-connected WiFi credential for reader auto-sync");
+    return;
+  }
+
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  String mac = WiFi.macAddress();
+  mac.replace(":", "");
+  const String hostname = "CrossPoint-Reader-" + mac;
+  WiFi.setHostname(hostname.c_str());
+  if (credential->password.empty()) {
+    WiFi.begin(ssid.c_str());
+  } else {
+    WiFi.begin(ssid.c_str(), credential->password.c_str());
+  }
+  LOG_INF("TOTO", "Started saved WiFi reconnect for reader auto-sync: %s", ssid.c_str());
+}
+
+}  // namespace
 
 bool ReaderActivity::isXtcFile(const std::string& path) { return FsHelpers::hasXtcExtension(path); }
 
@@ -157,6 +193,7 @@ void ReaderActivity::onEnter() {
     }
     onGoToTxtReader(std::move(txt));
   } else {
+    reconnectSavedWifiForToto();
     auto epub = loadEpub(initialBookPath);
     if (!epub) {
       onGoBack();

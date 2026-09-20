@@ -15,6 +15,7 @@ constexpr uint16_t CHECKPOINT_VERSION = 1;
 constexpr size_t CHECKPOINT_SIZE = 48;
 constexpr uint32_t BACKOFF_BASE_MS = 15000;
 constexpr uint32_t BACKOFF_MAX_MS = 6U * 60U * 60U * 1000U;
+constexpr uint32_t READER_SYNC_COOLDOWN_MS = 3U * 60U * 1000U;
 
 enum class TimePrecision : uint8_t {
   UNKNOWN = 0,
@@ -75,6 +76,10 @@ bool acknowledgmentMatches(std::string_view eventId, uint64_t sequence, std::str
                            std::string_view acknowledgedSequence);
 ProgressDirective parseProgressDirective(std::string_view value);
 bool shouldAutoApply(ProgressDirective directive);
+bool mayUploadAfterPull(bool succeeded, bool hasMore);
+bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs);
+bool readerSyncWindowReady(uint32_t nowMs, uint32_t nextAttemptMs, uint32_t lastSuccessMs, bool pageSettled,
+                           bool buildActive);
 std::string boundedUtf8(std::string_view value, size_t maxBytes);
 std::string annotationFingerprint(std::string_view syncId, std::string_view text, std::string_view note,
                                   std::string_view xpointer, uint32_t basisPoints);

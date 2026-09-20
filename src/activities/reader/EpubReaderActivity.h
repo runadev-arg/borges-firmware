@@ -9,6 +9,8 @@
 #include "EndOfBookOptions.h"
 #include "EpubReaderMenuActivity.h"
 #include "ProgressMapper.h"
+#include "TotoBookSyncActivity.h"
+#include "TotoDurableQueue.h"
 #include "activities/Activity.h"
 
 class EpubReaderActivity final : public Activity {
@@ -32,6 +34,11 @@ class EpubReaderActivity final : public Activity {
   float pendingSpineProgress = 0.0f;
   bool pendingScreenshot = false;
   bool pendingSyncSaveError = false;
+  bool pendingSyncQueueError = false;
+  std::optional<toto::ProgressInboxItem> pendingAppliedRemote;
+  bool totoTrackingReady = false;
+  unsigned long lastSyncQueueRetryMs = 0;
+  bool remoteDecisionChecked = false;
   // Consecutive page-load failures. Each failure drops the section and rebuilds on the next render,
   // which recovers a transiently corrupt cache; capped so a persistently bad page can't spin forever.
   uint8_t pageLoadRetryCount = 0;
@@ -170,6 +177,8 @@ class EpubReaderActivity final : public Activity {
   // Returns true if sync acted (launched, or surfaced a save error); false if it was a no-op
   // because no KOReader credentials are stored.
   bool launchKOReaderSync();
+  bool launchTotoAutoSync();
+  bool launchTotoBookSync(TotoBookSyncActivity::Mode mode);
   void applyOrientation(uint8_t orientation);
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);

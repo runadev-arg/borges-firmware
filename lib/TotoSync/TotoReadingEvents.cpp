@@ -30,7 +30,8 @@ ReadingEvents& ReadingEvents::instance() {
 }
 
 bool ReadingEvents::beginBook(const std::string& epubPath, std::string bookTitle, std::string bookAuthor) {
-  if (active()) endBook();
+  // Never replace the only in-memory retry of a failed SD write with another book.
+  if (active() && !endBook()) return false;
   if (!TOTO_CREDENTIALS.paired() || !TOTO_QUEUE.begin()) return false;
   bookHash = KOReaderDocumentId::calculate(epubPath);
   if (bookHash.size() != 32) {
@@ -47,6 +48,8 @@ bool ReadingEvents::beginBook(const std::string& epubPath, std::string bookTitle
   sessionStartedUnixSeconds = wall.unixSeconds;
   pagesRead = 0;
   havePage = false;
+  lastObservedXpointerSize = 0;
+  progressPending = false;
   pageRowCount = 0;
   statsBucket = 0;
   progressIdentity = {};
@@ -58,26 +61,51 @@ bool ReadingEvents::beginBook(const std::string& epubPath, std::string bookTitle
   return enqueueStarted();
 }
 
-void ReadingEvents::recordPosition(float percentage, const std::string& xpointer, bool explicitJump) {
-  if (!active()) return;
+bool ReadingEvents::recordPosition(float percentage, const std::string& xpointer, bool explicitJump) {
+  if (!active()) return true;
   percentage = std::clamp(percentage, 0.0f, 1.0f);
   const uint32_t page = static_cast<uint32_t>(std::lround(percentage * static_cast<float>(NORMALIZED_TOTAL_PAGES)));
+
+  // A menu rerender or pagination-cache update is not a fresh reading movement.
+  const bool sameLocator = xpointer.size() <= lastObservedXpointer.size() &&
+                           xpointer.size() == lastObservedXpointerSize &&
+                           std::equal(xpointer.begin(), xpointer.end(), lastObservedXpointer.begin());
+  const bool samePosition = havePage && page == currentPage && sameLocator && !explicitJump;
+  if (samePosition && !progressPending) return true;
+  if (!samePosition) pendingProgressTime = now();
+  lastObservedXpointerSize = std::min(xpointer.size(), lastObservedXpointer.size());
+  std::copy_n(xpointer.data(), lastObservedXpointerSize, lastObservedXpointer.begin());
 
   if (!havePage) {
     currentPage = page;
     pageStartedMs = millis();
     havePage = true;
+    // Opening an old local page is not a new reading movement. In particular,
+    // reconnecting/reopening must not re-date it after another device's progress.
+    if (!explicitJump) return true;
   } else if (page != currentPage) {
     finishCurrentPage();
     currentPage = page;
     pageStartedMs = millis();
     ++pagesRead;
   }
-  persistProgress(percentage, xpointer, explicitJump);
+  pendingPercentage = percentage;
+  if (!samePosition || !progressPending) pendingExplicitJump = explicitJump;
+  progressPending = !persistProgress(percentage, xpointer, pendingExplicitJump, pendingProgressTime);
+  if (progressPending) LOG_ERR("TOTO", "Progress is local but not queued; SD write will be retried");
+  return !progressPending;
 }
 
-void ReadingEvents::endBook() {
-  if (!active()) return;
+bool ReadingEvents::retryPendingProgress() {
+  if (!progressPending) return true;
+  const std::string locator(lastObservedXpointer.data(), lastObservedXpointerSize);
+  progressPending = !persistProgress(pendingPercentage, locator, pendingExplicitJump, pendingProgressTime);
+  return !progressPending;
+}
+
+bool ReadingEvents::endBook() {
+  if (!active()) return true;
+  if (!retryPendingProgress()) return false;
   finishCurrentPage();
   persistPageStats();
   const uint32_t durationSeconds = (millis() - sessionStartedMs) / 1000U;
@@ -91,6 +119,7 @@ void ReadingEvents::endBook() {
   pageStatsIdentity = {};
   havePage = false;
   pageRowCount = 0;
+  return true;
 }
 
 ResolvedTime ReadingEvents::now() const {
@@ -119,7 +148,8 @@ bool ReadingEvents::enqueueStarted() {
   return queued;
 }
 
-bool ReadingEvents::persistProgress(float percentage, const std::string& xpointer, bool explicitJump) {
+bool ReadingEvents::persistProgress(float percentage, const std::string& xpointer, bool explicitJump,
+                                    ResolvedTime wall) {
   if (progressIdentity.id.empty()) {
     const auto identity =
         TOTO_QUEUE.reserveIdentity(deterministicUuid(sessionId + ":progress:" + std::to_string(statsBucket)));
@@ -133,7 +163,6 @@ bool ReadingEvents::persistProgress(float percentage, const std::string& xpointe
   payload["total_pages"] = NORMALIZED_TOTAL_PAGES;
   if (!xpointer.empty() && xpointer.size() <= 512) payload["xpointer"] = xpointer;
   payload["explicit_jump"] = explicitJump;
-  const auto wall = now();
   const std::string event =
       serializeCommon(progressIdentity, "progress.changed", "reading_progress", "koreader_partial_md5:" + bookHash,
                       payload, wall.unixSeconds, wall.precision);

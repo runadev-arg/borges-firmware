@@ -72,9 +72,13 @@ void TotoSyncActivity::activate() {
   } else if (selectedIndex == 1 && TOTO_CREDENTIALS.paired()) {
     ensureWifiThen(Action::Sync);
   } else if (selectedIndex == 2 && progressDecision) {
-    ensureWifiThen(Action::AcceptProgress);
+    pendingAction = Action::AcceptProgress;
+    working = true;
+    requestUpdate();
   } else if (selectedIndex == 3 && progressDecision) {
-    ensureWifiThen(Action::DismissProgress);
+    pendingAction = Action::DismissProgress;
+    working = true;
+    requestUpdate();
   } else {
     resultText = tr(STR_TOTO_NOT_PAIRED);
     requestUpdate();
@@ -136,19 +140,16 @@ void TotoSyncActivity::performPendingAction() {
     }
   } else if (progressDecision) {
     const bool accept = pendingAction == Action::AcceptProgress;
-    const auto result = toto::SyncClient::resolveSuggestion(progressDecision->suggestionId, accept);
-    if (result == toto::SyncClient::Result::OK) {
-      const bool stored = accept ? TOTO_QUEUE.acceptProgress(*progressDecision)
-                                 : TOTO_QUEUE.resolveProgress(progressDecision->serverSequence);
-      if (!stored) {
-        resultText = tr(STR_TOTO_FAILED);
-      } else if (accept) {
-        resultText = tr(STR_TOTO_RESUME_ACCEPTED);
-      } else {
-        resultText = tr(STR_TOTO_RESUME_DISMISSED);
-      }
+    // A saved location is usable offline and survives a server-side dismissal.
+    // Server suggestion acknowledgement is optional; the local decision is durable.
+    const bool stored =
+        accept ? TOTO_QUEUE.acceptProgress(*progressDecision) : TOTO_QUEUE.dismissProgress(*progressDecision);
+    if (!stored) {
+      resultText = tr(STR_TOTO_FAILED);
+    } else if (accept) {
+      resultText = tr(STR_TOTO_RESUME_ACCEPTED);
     } else {
-      resultText = std::string(tr(STR_TOTO_FAILED)) + ": " + toto::SyncClient::resultName(result);
+      resultText = tr(STR_TOTO_RESUME_DISMISSED);
     }
   }
   refreshDecision();
@@ -156,7 +157,7 @@ void TotoSyncActivity::performPendingAction() {
   requestUpdate();
 }
 
-void TotoSyncActivity::refreshDecision() { progressDecision = TOTO_QUEUE.nextProgressDecision(); }
+void TotoSyncActivity::refreshDecision() { progressDecision = TOTO_QUEUE.nextProgressDecision({}, true); }
 
 void TotoSyncActivity::render(RenderLock&&) {
   renderer.clearScreen();
@@ -186,7 +187,11 @@ void TotoSyncActivity::render(RenderLock&&) {
   } else if (progressDecision) {
     std::array<char, 96> resumeLine{};
     std::snprintf(resumeLine.data(), resumeLine.size(), tr(STR_TOTO_RESUME_AT), progressDecision->percentage);
-    renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 64, resumeLine.data(), true, EpdFontFamily::BOLD);
+    const std::string source = progressDecision->sourceDeviceName.empty()
+                                   ? std::string(resumeLine.data())
+                                   : progressDecision->sourceDeviceName + " — " + resumeLine.data();
+    const auto clipped = renderer.truncatedText(UI_10_FONT_ID, source.c_str(), width - 2 * metrics.contentSidePadding);
+    renderer.drawCenteredText(UI_10_FONT_ID, summaryTop + 64, clipped.c_str(), true, EpdFontFamily::BOLD);
   } else if (!resultText.empty()) {
     // Diagnostic tails ("[clock ip:... dns:fail ...]") exceed one screen line;
     // wrap instead of clipping the very detail the failure screen exists for.

@@ -5,11 +5,24 @@
 #include <SecureHttpClient.h>
 #include <base64.h>
 
+#include <cmath>
 #include <string>
 
 #include "KOReaderCredentialStore.h"
+#include "KOReaderSyncProtocol.h"
+#include "TotoCredentialStore.h"
+#include "TotoNetBoot.h"
+#include "TotoTrust.h"
 
 int KOReaderSyncClient::lastHttpCode = 0;
+int KOReaderSyncClient::lastProtocolCode = 0;
+std::string KOReaderSyncClient::lastRequestId;
+std::string KOReaderSyncClient::lastEndpoint;
+std::string KOReaderSyncClient::lastTransportError;
+
+#ifndef CROSSPOINT_VERSION
+#define CROSSPOINT_VERSION "development"
+#endif
 
 namespace {
 // Device identifier for CrossPoint reader
@@ -37,6 +50,88 @@ constexpr char DEVICE_ID[] = "crosspoint-reader";
 // 43 KB largest block; requiring 50 KB contiguous refused syncs that fit.
 constexpr uint32_t MIN_FREE_FOR_TLS = 50000;
 constexpr uint32_t MIN_BLOCK_FOR_TLS = 20000;
+constexpr uint32_t HTTP_TIMEOUT_MS = 20000;
+constexpr size_t MAX_DIAGNOSTIC_BYTES = 96;
+
+std::string boundedDiagnostic(std::string value) {
+  if (value.size() > MAX_DIAGNOSTIC_BYTES) value.resize(MAX_DIAGNOSTIC_BYTES);
+  return value;
+}
+
+void resetDiagnostics(const char* endpoint) {
+  KOReaderSyncClient::lastHttpCode = 0;
+  KOReaderSyncClient::lastProtocolCode = 0;
+  KOReaderSyncClient::lastRequestId.clear();
+  KOReaderSyncClient::lastEndpoint = endpoint;
+  KOReaderSyncClient::lastTransportError.clear();
+}
+
+void captureDiagnostics(freeink::SecureHttpClient& http, int httpCode, const std::string& body) {
+  KOReaderSyncClient::lastHttpCode = httpCode;
+  KOReaderSyncClient::lastProtocolCode = parseKOReaderProtocolCode(body);
+  KOReaderSyncClient::lastRequestId = boundedDiagnostic(http.getHeader("x-request-id"));
+  KOReaderSyncClient::lastTransportError = boundedDiagnostic(http.lastErrorDetail());
+  LOG_INF("KOSync", "endpoint=%s http=%d code=%d request_id=%s transport=%s", KOReaderSyncClient::lastEndpoint.c_str(),
+          httpCode, KOReaderSyncClient::lastProtocolCode,
+          KOReaderSyncClient::lastRequestId.empty() ? "-" : KOReaderSyncClient::lastRequestId.c_str(),
+          KOReaderSyncClient::lastTransportError.empty() ? "-" : KOReaderSyncClient::lastTransportError.c_str());
+}
+
+class Request {
+ public:
+  bool begin(const std::string& url) {
+    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.setReuse(false);
+    http.setUserAgent(std::string("CrossPoint-KOSync/") + CROSSPOINT_VERSION);
+
+    const std::string baseUrl = KOREADER_STORE.getBaseUrl();
+    if (baseUrl.rfind("https://", 0) == 0) {
+      if (TOTO_CREDENTIALS.paired()) {
+        std::string clockDetail;
+        if (!toto::ensureTrustedClock(&clockDetail)) {
+          KOReaderSyncClient::lastTransportError =
+              boundedDiagnostic(clockDetail.empty() ? "trusted-clock bootstrap failed" : clockDetail);
+          LOG_ERR("KOSync", "Trusted TLS clock unavailable: %s", KOReaderSyncClient::lastTransportError.c_str());
+          return false;
+        }
+        http.setCACert(toto::rootCertificate());
+      } else {
+        // Preserve standalone third-party KOSync compatibility when no Toto
+        // pairing exists to provide a pinned certificate and trusted clock.
+        http.setInsecure();
+      }
+      const std::string host = toto::netboot::hostFromBaseUrl(baseUrl);
+      if (host.empty()) return false;
+      const toto::netboot::Candidates candidates = toto::netboot::resolveServer(host.c_str());
+      if (candidates.count == 0 || !http.begin(url)) return false;
+      http.setServerAddress(candidates.ip[0]);
+      return true;
+    }
+    return http.begin(url);
+  }
+
+  toto::netboot::WifiFullPowerScope wifiFullPower;
+  freeink::SecureHttpClient http;
+};
+
+KOReaderSyncClient::Error mappedError(KOReaderSyncOperation operation, int httpCode, const std::string& body) {
+  switch (classifyKOReaderResponse(operation, httpCode, body)) {
+    case KOReaderSyncResponse::OK:
+      return KOReaderSyncClient::OK;
+    case KOReaderSyncResponse::NOT_FOUND:
+      return KOReaderSyncClient::NOT_FOUND;
+    case KOReaderSyncResponse::AUTH_FAILED:
+      return KOReaderSyncClient::AUTH_FAILED;
+    case KOReaderSyncResponse::ACCESS_DENIED:
+      return KOReaderSyncClient::ACCESS_DENIED;
+    case KOReaderSyncResponse::INVALID_REQUEST:
+      return KOReaderSyncClient::INVALID_REQUEST;
+    case KOReaderSyncResponse::USER_EXISTS:
+      return KOReaderSyncClient::USER_EXISTS;
+    default:
+      return KOReaderSyncClient::SERVER_ERROR;
+  }
+}
 
 // Apply the shared KOSync auth headers after begin(). x-auth-* is the native
 // KOSync scheme; Basic auth is added for Calibre-Web-Automated compatibility.
@@ -63,7 +158,7 @@ bool insufficientHeap() {
 }  // namespace
 
 KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
-  lastHttpCode = 0;
+  resetDiagnostics("GET users/auth");
   if (!KOREADER_STORE.hasCredentials()) {
     LOG_DBG("KOSync", "No credentials configured");
     return NO_CREDENTIALS;
@@ -73,27 +168,21 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
   LOG_DBG("KOSync", "Authenticating: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
   if (insufficientHeap()) return LOW_MEMORY;
 
-  freeink::SecureHttpClient http;
-  http.setInsecure();
-  if (!http.begin(url)) {
+  Request request;
+  if (!request.begin(url)) {
     LOG_ERR("KOSync", "Bad URL: %s", url.c_str());
     return NETWORK_ERROR;
   }
-  applyAuthHeaders(http);
-  const int httpCode = http.GET();
-  http.end();
-  lastHttpCode = httpCode;
-
-  LOG_DBG("KOSync", "Auth response: %d", httpCode);
-
-  if (httpCode <= 0) return NETWORK_ERROR;
-  if (httpCode == 200) return OK;
-  if (httpCode == 401) return AUTH_FAILED;
-  return SERVER_ERROR;
+  applyAuthHeaders(request.http);
+  const int httpCode = request.http.GET();
+  const std::string body = httpCode > 0 ? request.http.getString() : "";
+  captureDiagnostics(request.http, httpCode, body);
+  request.http.end();
+  return httpCode <= 0 ? NETWORK_ERROR : mappedError(KOReaderSyncOperation::AUTHENTICATE, httpCode, body);
 }
 
 KOReaderSyncClient::Error KOReaderSyncClient::createUser() {
-  lastHttpCode = 0;
+  resetDiagnostics("POST users/create");
   if (!KOREADER_STORE.hasCredentials()) {
     LOG_DBG("KOSync", "No credentials configured");
     return NO_CREDENTIALS;
@@ -109,61 +198,58 @@ KOReaderSyncClient::Error KOReaderSyncClient::createUser() {
   std::string body;
   serializeJson(doc, body);
 
-  freeink::SecureHttpClient http;
-  http.setInsecure();
-  if (!http.begin(url)) {
+  Request request;
+  if (!request.begin(url)) {
     LOG_ERR("KOSync", "Bad URL: %s", url.c_str());
     return NETWORK_ERROR;
   }
-  http.addHeader("Accept", "application/vnd.koreader.v1+json");
-  http.addHeader("Content-Type", "application/json");
-  const int httpCode = http.sendRequest("POST", body);
-  http.end();
-  lastHttpCode = httpCode;
-
-  LOG_DBG("KOSync", "Create user response: %d", httpCode);
-
-  if (httpCode <= 0) return NETWORK_ERROR;
-  if (httpCode == 200 || httpCode == 201) return OK;
-  if (httpCode == 402) return USER_EXISTS;
-  return SERVER_ERROR;
+  request.http.addHeader("Accept", "application/vnd.koreader.v1+json");
+  request.http.addHeader("Content-Type", "application/json");
+  const int httpCode = request.http.sendRequest("POST", body);
+  const std::string response = httpCode > 0 ? request.http.getString() : "";
+  captureDiagnostics(request.http, httpCode, response);
+  request.http.end();
+  return httpCode <= 0 ? NETWORK_ERROR : mappedError(KOReaderSyncOperation::CREATE_USER, httpCode, response);
 }
 
 KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& documentHash,
                                                           KOReaderProgress& outProgress) {
-  lastHttpCode = 0;
+  resetDiagnostics("GET syncs/progress/:document");
   if (!KOREADER_STORE.hasCredentials()) {
     LOG_DBG("KOSync", "No credentials configured");
     return NO_CREDENTIALS;
+  }
+  if (!isValidKOReaderDocumentHash(documentHash)) {
+    lastProtocolCode = 2003;
+    LOG_ERR("KOSync", "Refusing invalid document hash");
+    return INVALID_REQUEST;
   }
 
   const std::string url = KOREADER_STORE.getBaseUrl() + "/syncs/progress/" + documentHash;
   LOG_DBG("KOSync", "Getting progress: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
   if (insufficientHeap()) return LOW_MEMORY;
 
-  freeink::SecureHttpClient http;
-  http.setInsecure();
-  if (!http.begin(url)) {
+  Request request;
+  if (!request.begin(url)) {
     LOG_ERR("KOSync", "Bad URL: %s", url.c_str());
     return NETWORK_ERROR;
   }
-  applyAuthHeaders(http);
-  const int httpCode = http.GET();
-  lastHttpCode = httpCode;
-
-  LOG_DBG("KOSync", "Get progress response: %d", httpCode);
+  applyAuthHeaders(request.http);
+  const int httpCode = request.http.GET();
+  const std::string body = httpCode > 0 ? request.http.getString() : "";
+  captureDiagnostics(request.http, httpCode, body);
+  request.http.end();
 
   if (httpCode <= 0) {
-    http.end();
     return NETWORK_ERROR;
   }
 
-  if (httpCode == 200) {
+  const Error responseError = mappedError(KOReaderSyncOperation::GET_PROGRESS, httpCode, body);
+  if (responseError == OK) {
     JsonDocument doc;
-    const DeserializationError error = deserializeJson(doc, http.getString().c_str());
-    http.end();
+    const DeserializationError error = deserializeJson(doc, body);
 
-    if (error) {
+    if (error || !doc["progress"].is<const char*>() || !doc["percentage"].is<float>()) {
       LOG_ERR("KOSync", "JSON parse failed: %s", error.c_str());
       return JSON_ERROR;
     }
@@ -196,18 +282,20 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
     LOG_DBG("KOSync", "Got progress: %.2f%% at %s", outProgress.percentage * 100, outProgress.progress.c_str());
     return OK;
   }
-
-  http.end();
-  if (httpCode == 401) return AUTH_FAILED;
-  if (httpCode == 404) return NOT_FOUND;
-  return SERVER_ERROR;
+  return responseError;
 }
 
 KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgress& progress) {
-  lastHttpCode = 0;
+  resetDiagnostics("PUT syncs/progress");
   if (!KOREADER_STORE.hasCredentials()) {
     LOG_DBG("KOSync", "No credentials configured");
     return NO_CREDENTIALS;
+  }
+  if (!isValidKOReaderDocumentHash(progress.document) || progress.progress.empty() || progress.progress.size() > 4096 ||
+      !std::isfinite(progress.percentage) || progress.percentage < 0.0f || progress.percentage > 1.0f) {
+    lastProtocolCode = 2003;
+    LOG_ERR("KOSync", "Refusing invalid local progress payload");
+    return INVALID_REQUEST;
   }
 
   const std::string url = KOREADER_STORE.getBaseUrl() + "/syncs/progress";
@@ -243,26 +331,20 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   std::string body;
   serializeJson(doc, body);
 
-  LOG_DBG("KOSync", "Request body: %s", body.c_str());
+  LOG_DBG("KOSync", "Prepared progress payload: %u bytes", static_cast<unsigned>(body.size()));
 
-  freeink::SecureHttpClient http;
-  http.setInsecure();
-  if (!http.begin(url)) {
+  Request request;
+  if (!request.begin(url)) {
     LOG_ERR("KOSync", "Bad URL: %s", url.c_str());
     return NETWORK_ERROR;
   }
-  applyAuthHeaders(http);
-  http.addHeader("Content-Type", "application/json");
-  const int httpCode = http.sendRequest("PUT", body);
-  http.end();
-  lastHttpCode = httpCode;
-
-  LOG_DBG("KOSync", "Update progress response: %d", httpCode);
-
-  if (httpCode <= 0) return NETWORK_ERROR;
-  if (httpCode == 200 || httpCode == 202) return OK;
-  if (httpCode == 401) return AUTH_FAILED;
-  return SERVER_ERROR;
+  applyAuthHeaders(request.http);
+  request.http.addHeader("Content-Type", "application/json");
+  const int httpCode = request.http.sendRequest("PUT", body);
+  const std::string response = httpCode > 0 ? request.http.getString() : "";
+  captureDiagnostics(request.http, httpCode, response);
+  request.http.end();
+  return httpCode <= 0 ? NETWORK_ERROR : mappedError(KOReaderSyncOperation::PUT_PROGRESS, httpCode, response);
 }
 
 const char* KOReaderSyncClient::errorString(Error error) {
@@ -283,6 +365,12 @@ const char* KOReaderSyncClient::errorString(Error error) {
       return "No progress found";
     case LOW_MEMORY:
       return "Not enough memory for sync — please retry";
+    case USER_EXISTS:
+      return "Username already exists";
+    case ACCESS_DENIED:
+      return "Sync access denied; pair this reader again";
+    case INVALID_REQUEST:
+      return "Invalid sync data";
     default:
       return "Unknown error";
   }

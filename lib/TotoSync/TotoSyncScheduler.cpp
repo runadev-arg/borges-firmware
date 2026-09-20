@@ -8,6 +8,7 @@
 
 #include "TotoCredentialStore.h"
 #include "TotoDurableQueue.h"
+#include "TotoReadingEvents.h"
 #include "TotoSyncClient.h"
 #include "TotoSyncCore.h"
 
@@ -23,7 +24,7 @@ void SyncScheduler::notifyLifecycleCommit() {
   if (nextAttemptMs == 0) nextAttemptMs = millis() + 5000U;
 }
 
-void SyncScheduler::tick(bool readerActive) {
+void SyncScheduler::refreshConnectivitySchedule() {
   constexpr uint32_t CONNECT_DELAY_MS = 2000U;
   constexpr uint32_t IDLE_POLL_INTERVAL_MS = 15U * 60U * 1000U;
   const bool wifiConnected = WiFi.status() == WL_CONNECTED;
@@ -36,14 +37,51 @@ void SyncScheduler::tick(bool readerActive) {
     nextAttemptMs = millis();
   }
   wifiWasConnected = wifiConnected;
+}
 
-  if (running || readerActive || !pending || !TOTO_CREDENTIALS.paired() || !wifiConnected ||
-      static_cast<int32_t>(millis() - nextAttemptMs) < 0) {
+void SyncScheduler::tick(bool readerActive) {
+  refreshConnectivitySchedule();
+
+  if (running || readerActive || !pending || !TOTO_CREDENTIALS.paired() || WiFi.status() != WL_CONNECTED ||
+      !deadlineReached(millis(), nextAttemptMs)) {
     return;
   }
 
+  runBurst(1);
+}
+
+bool SyncScheduler::readerSyncDue(bool pageSettled, bool buildActive) {
+  refreshConnectivitySchedule();
+  return !running && pending && TOTO_CREDENTIALS.paired() && WiFi.status() == WL_CONNECTED &&
+         readerSyncWindowReady(millis(), nextAttemptMs, lastSuccessMs, pageSettled, buildActive);
+}
+
+void SyncScheduler::syncNow(uint8_t maxExchanges) {
+  refreshConnectivitySchedule();
+  if (running || !TOTO_CREDENTIALS.paired() || WiFi.status() != WL_CONNECTED) return;
+  runBurst(std::max<uint8_t>(maxExchanges, 1U));
+}
+
+void SyncScheduler::flushBeforeSleep() {
+  if (!TOTO_CREDENTIALS.paired() || WiFi.status() != WL_CONNECTED || TOTO_QUEUE.depth() == 0) return;
+  pending = true;
+  nextAttemptMs = millis();
+  runBurst(1);
+}
+
+void SyncScheduler::runBurst(uint8_t maxExchanges) {
+  if (running) return;
+
   running = true;
-  const SyncClient::Outcome outcome = SyncClient::syncOnce();
+  SyncClient::Outcome outcome;
+  for (uint8_t exchange = 0; exchange < maxExchanges; ++exchange) {
+    if (!TOTO_READING_EVENTS.retryPendingProgress()) {
+      outcome.result = SyncClient::Result::STORAGE_ERROR;
+      break;
+    }
+    outcome = SyncClient::syncOnce();
+    if (outcome.result != SyncClient::Result::OK || (outcome.queueDepth == 0 && !outcome.hasMore)) break;
+  }
   running = false;
   if (outcome.result == SyncClient::Result::OK) {
     failures = 0;

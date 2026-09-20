@@ -877,8 +877,17 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
     LOG_DBG("PM", "Chapter-start XPath %s -> spine=%d page start", koPos.xpath.c_str(), result.spineIndex);
   }
   if (!resolvedIntra) {
+    // A syntactically plausible KOReader chapter may refer to a different DOM.
+    // If its locator cannot be resolved, use percentage across the whole EPUB,
+    // not a clamped page inside the unverified chapter.
+    if (xpathSpine >= 0 && xpathSpine < spineCount && !koPos.xpath.empty()) {
+      return toCrossPoint(epub, SavedProgressPosition{"", clampedPercentage}, renderer, currentSpineIndex,
+                          totalPagesInCurrentSpine, fallbackTotalPages);
+    }
     const size_t bytesIn = (targetBytes > prevCum) ? (targetBytes - prevCum) : 0;
-    intra = std::max(0.0f, std::min(1.0f, static_cast<float>(bytesIn) / static_cast<float>(spineSize)));
+    intra = spineSize == 0
+                ? 0.0f
+                : std::max(0.0f, std::min(1.0f, static_cast<float>(bytesIn) / static_cast<float>(spineSize)));
   }
 
   result.pageNumber = std::max(
