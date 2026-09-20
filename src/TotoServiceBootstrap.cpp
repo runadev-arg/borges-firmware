@@ -32,7 +32,7 @@ bool bootstrapCrossPointServices() {
   }
 
   const OpdsServer server{
-      .name = tr(STR_CINABRIO_LIBRARY),
+      .name = tr(STR_BORGES_LIBRARY),
       .url = TOTO_CREDENTIALS.getBaseUrl() + "/api/opds",
       .username = TOTO_CREDENTIALS.getDeviceId(),
       .password = TOTO_CREDENTIALS.getToken(),

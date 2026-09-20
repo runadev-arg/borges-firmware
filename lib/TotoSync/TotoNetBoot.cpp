@@ -225,7 +225,7 @@ uint64_t httpDateEpoch(IPAddress ip, const char* host, std::string& detail) {
   // drain. Connection: close keeps us from waiting on a keep-alive.
   std::string request = "HEAD / HTTP/1.1\r\nHost: ";
   request += host;
-  request += "\r\nUser-Agent: CrossPoint-Toto/" CROSSPOINT_VERSION "\r\nAccept: */*\r\nConnection: close\r\n\r\n";
+  request += "\r\nUser-Agent: CrossPoint-Borges/" CROSSPOINT_VERSION "\r\nAccept: */*\r\nConnection: close\r\n\r\n";
   if (client.write(reinterpret_cast<const uint8_t*>(request.data()), request.size()) != request.size()) {
     client.stop();
     detail = "httpdate:fail(tcp)";
@@ -281,7 +281,7 @@ uint64_t httpsDateEpoch(IPAddress ip, const char* host, std::string& detail) {
   http.setInsecure();
   http.setTimeout(8000);
   http.setReuse(false);
-  http.setUserAgent(std::string("CrossPoint-Toto/") + CROSSPOINT_VERSION);
+  http.setUserAgent(std::string("CrossPoint-Borges/") + CROSSPOINT_VERSION);
   if (!http.begin(std::string("https://") + host + "/")) {
     detail = "httpsdate:fail(url)";
     return 0;

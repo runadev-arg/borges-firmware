@@ -321,11 +321,11 @@ void setup() {
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
   TOTO_CREDENTIALS.loadFromFile();
-  // Pairing owns the Cinabrio integrations. Repair a missing/stale OPDS or
+  // Pairing owns the Borges integrations. Repair a missing/stale OPDS or
   // KOSync entry after an upgrade or credential rotation, but the bootstrap is
   // idempotent and does not write the SD when all fields already match.
   if (TOTO_CREDENTIALS.paired() && !toto::bootstrapCrossPointServices()) {
-    LOG_ERR("TOTO", "Could not repair paired Cinabrio services at boot");
+    LOG_ERR("TOTO", "Could not repair paired Borges services at boot");
   }
   TOTO_QUEUE.begin();
   if (TOTO_QUEUE.depth() > 0) TOTO_SYNC_SCHEDULER.notifyLifecycleCommit();

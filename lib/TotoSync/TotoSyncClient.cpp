@@ -92,7 +92,7 @@ int request(const char* method, const std::string& path, const std::string& body
   http.setCACert(rootCertificate());
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setReuse(false);
-  http.setUserAgent(std::string("CrossPoint-Toto/") + CROSSPOINT_VERSION);
+  http.setUserAgent(std::string("CrossPoint-Borges/") + CROSSPOINT_VERSION);
   if (!http.begin(baseUrl + path)) return -1;
   http.setServerAddress(candidates.ip[0]);  // begin() FIRST, pin AFTER
   http.addHeader("Accept", "application/json");

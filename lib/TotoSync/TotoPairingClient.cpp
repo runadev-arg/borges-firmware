@@ -137,7 +137,7 @@ int postJson(const std::string& path, const std::string& body, std::string& resp
     http.setCACert(rootCertificate());
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.setReuse(false);
-    http.setUserAgent(std::string("CrossPoint-Toto/") + CROSSPOINT_VERSION);
+    http.setUserAgent(std::string("CrossPoint-Borges/") + CROSSPOINT_VERSION);
     if (!http.begin(baseUrl + path)) {
       PairingClient::lastErrorDetail = "http_begin";
       return -1;

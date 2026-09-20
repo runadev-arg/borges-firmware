@@ -1,4 +1,4 @@
-name: Publish Toto X4 Release
+name: Publish Borges X4 Release
 
 on:
   push:
@@ -38,7 +38,7 @@ jobs:
           cmake --build build/test
           ctest --test-dir build/test --output-on-failure -j
 
-      - name: Build current Toto firmware
+      - name: Build current Borges firmware
         run: SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" pio run -e toto_release
 
       - name: Build pinned known-good firmware
@@ -84,7 +84,7 @@ jobs:
               "version": version,
               "sync_protocol_min": 2,
               "firmware": descriptor("firmware.bin"),
-              "release_notes": "Toto Sync v2 para Xteink X4.",
+              "release_notes": "CrossPoint Borges: Borges Sync v2 para Xteink X4.",
               "rollback": {
                   "version": os.environ["KNOWN_GOOD_VERSION"],
                   "manifest_url": "/api/releases/x4/known-good/manifest.json",
@@ -119,6 +119,6 @@ jobs:
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           else
             gh release create "$GITHUB_REF_NAME" dist/* \
-              --title "CrossPoint Toto ${GITHUB_REF_NAME#toto-v}" \
-              --notes "Release X4 con Toto Sync v2, manifiesto target-bound, SHA-256 y rollback known-good."
+              --title "CrossPoint Borges ${GITHUB_REF_NAME#toto-v}" \
+              --notes "CrossPoint Borges para Xteink X4: Borges Sync v2, manifiesto target-bound, SHA-256 y rollback known-good."
           fi

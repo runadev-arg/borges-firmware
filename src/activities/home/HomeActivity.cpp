@@ -113,12 +113,12 @@ void HomeActivity::onEnter() {
   Activity::onEnter();
 
   hasOpdsServers = OPDS_STORE.hasServers();
-  hasCinabrioLibrary = false;
+  hasBorgesLibrary = false;
   if (TOTO_CREDENTIALS.paired()) {
-    const std::string cinabrioUrl = TOTO_CREDENTIALS.getBaseUrl() + "/api/opds";
+    const std::string borgesUrl = TOTO_CREDENTIALS.getBaseUrl() + "/api/opds";
     for (const auto& server : OPDS_STORE.getServers()) {
-      if (server.url == cinabrioUrl) {
-        hasCinabrioLibrary = true;
+      if (server.url == borgesUrl) {
+        hasBorgesLibrary = true;
         break;
       }
     }
@@ -316,7 +316,7 @@ void HomeActivity::render(RenderLock&&) {
   std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Settings};
 
   if (hasOpdsServers) {
-    menuItems.insert(menuItems.begin() + 2, hasCinabrioLibrary ? tr(STR_CINABRIO_LIBRARY) : tr(STR_OPDS_BROWSER));
+    menuItems.insert(menuItems.begin() + 2, hasBorgesLibrary ? tr(STR_BORGES_LIBRARY) : tr(STR_OPDS_BROWSER));
     menuIcons.insert(menuIcons.begin() + 2, Library);
   }
 
