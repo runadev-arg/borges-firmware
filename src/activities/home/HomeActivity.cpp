@@ -12,12 +12,12 @@
 #include <cstring>
 #include <vector>
 
-#include "CrossPointSettings.h"
-#include "CrossPointState.h"
+#include "BorgesSettings.h"
+#include "BorgesState.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
-#include "TotoCredentialStore.h"
+#include "BorgesCredentialStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -64,7 +64,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       if (!Storage.exists(coverPath.c_str())) {
         // If epub, try to load the metadata for title/author and cover
         if (FsHelpers::hasEpubExtension(book.path)) {
-          Epub epub(book.path, "/.crosspoint");
+          Epub epub(book.path, "/.borges");
           // Skip loading css since we only need metadata here
           epub.load(false, true);
 
@@ -83,7 +83,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
           requestUpdate();
         } else if (FsHelpers::hasXtcExtension(book.path)) {
           // Handle XTC file
-          Xtc xtc(book.path, "/.crosspoint");
+          Xtc xtc(book.path, "/.borges");
           if (xtc.load()) {
             // Try to generate thumbnail image for Continue Reading card
             if (!showingLoading) {
@@ -114,8 +114,8 @@ void HomeActivity::onEnter() {
 
   hasOpdsServers = OPDS_STORE.hasServers();
   hasBorgesLibrary = false;
-  if (TOTO_CREDENTIALS.paired()) {
-    const std::string borgesUrl = TOTO_CREDENTIALS.getBaseUrl() + "/api/opds";
+  if (BORGES_CREDENTIALS.paired()) {
+    const std::string borgesUrl = BORGES_CREDENTIALS.getBaseUrl() + "/api/opds";
     for (const auto& server : OPDS_STORE.getServers()) {
       if (server.url == borgesUrl) {
         hasBorgesLibrary = true;

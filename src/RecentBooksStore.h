@@ -26,7 +26,7 @@ class RecentBooksStore : public PersistableStore<RecentBooksStore> {
   friend class PersistableStore<RecentBooksStore>;
 
  public:
-  static const char* getFilePath() { return "/.crosspoint/recent.json"; }
+  static const char* getFilePath() { return "/.borges/recent.json"; }
   void toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 

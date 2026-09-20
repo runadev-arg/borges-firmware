@@ -8,11 +8,11 @@
 
 #include <optional>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "Epub.h"
 #include "EpubReaderActivity.h"
 #include "SdCardFontSystem.h"
-#include "TotoCredentialStore.h"
+#include "BorgesCredentialStore.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
 #include "WifiCredentialStore.h"
@@ -24,16 +24,16 @@
 
 namespace {
 
-void reconnectSavedWifiForToto() {
-  if (!TOTO_CREDENTIALS.paired() || WiFi.status() == WL_CONNECTED) return;
+void reconnectSavedWifiForBorges() {
+  if (!BORGES_CREDENTIALS.paired() || WiFi.status() == WL_CONNECTED) return;
   if (!WIFI_STORE.loadFromFile()) {
-    LOG_DBG("TOTO", "No saved WiFi store available for reader auto-sync");
+    LOG_DBG("BORGES", "No saved WiFi store available for reader auto-sync");
     return;
   }
   const std::string& ssid = WIFI_STORE.getLastConnectedSsid();
   const WifiCredential* credential = WIFI_STORE.findCredential(ssid);
   if (ssid.empty() || credential == nullptr) {
-    LOG_DBG("TOTO", "No last-connected WiFi credential for reader auto-sync");
+    LOG_DBG("BORGES", "No last-connected WiFi credential for reader auto-sync");
     return;
   }
 
@@ -43,14 +43,14 @@ void reconnectSavedWifiForToto() {
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   String mac = WiFi.macAddress();
   mac.replace(":", "");
-  const String hostname = "CrossPoint-Reader-" + mac;
+  const String hostname = "Borges-Reader-" + mac;
   WiFi.setHostname(hostname.c_str());
   if (credential->password.empty()) {
     WiFi.begin(ssid.c_str());
   } else {
     WiFi.begin(ssid.c_str(), credential->password.c_str());
   }
-  LOG_INF("TOTO", "Started saved WiFi reconnect for reader auto-sync: %s", ssid.c_str());
+  LOG_INF("BORGES", "Started saved WiFi reconnect for reader auto-sync: %s", ssid.c_str());
 }
 
 }  // namespace
@@ -70,7 +70,7 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
     return nullptr;
   }
 
-  auto epub = makeUniqueNoThrow<Epub>(path, "/.crosspoint");
+  auto epub = makeUniqueNoThrow<Epub>(path, "/.borges");
   if (!epub) {
     LOG_ERR("READER", "Failed to allocate EPUB object");
     return nullptr;
@@ -105,7 +105,7 @@ std::unique_ptr<Xtc> ReaderActivity::loadXtc(const std::string& path) {
     return nullptr;
   }
 
-  auto xtc = makeUniqueNoThrow<Xtc>(path, "/.crosspoint");
+  auto xtc = makeUniqueNoThrow<Xtc>(path, "/.borges");
   if (!xtc) {
     LOG_ERR("READER", "Failed to allocate XTC object");
     return nullptr;
@@ -124,7 +124,7 @@ std::unique_ptr<Txt> ReaderActivity::loadTxt(const std::string& path) {
     return nullptr;
   }
 
-  auto txt = makeUniqueNoThrow<Txt>(path, "/.crosspoint");
+  auto txt = makeUniqueNoThrow<Txt>(path, "/.borges");
   if (!txt) {
     LOG_ERR("READER", "Failed to allocate TXT object");
     return nullptr;
@@ -193,7 +193,7 @@ void ReaderActivity::onEnter() {
     }
     onGoToTxtReader(std::move(txt));
   } else {
-    reconnectSavedWifiForToto();
+    reconnectSavedWifiForBorges();
     auto epub = loadEpub(initialBookPath);
     if (!epub) {
       onGoBack();

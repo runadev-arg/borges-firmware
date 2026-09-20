@@ -5,15 +5,15 @@
 
 ## Scope Check
 
-CrossPoint is intentionally narrow. See [SCOPE.md](../blob/master/SCOPE.md) and [ROADMAP.md](../blob/master/ROADMAP.md).
+Borges is intentionally narrow. See [SCOPE.md](../blob/master/SCOPE.md) and [ROADMAP.md](../blob/master/ROADMAP.md).
 Please confirm:
 
 - [ ] I have read SCOPE.md and ROADMAP.md.
 - [ ] This PR is **not** a new built-in theme (themes are temporarily closed pending the move to SD-loaded themes).
 - [ ] This PR is **not** a new external network connector (sync engine, cloud storage, remote file access, etc.).
 - [ ] This PR is **not** an interactive app, writing tool, RSS/news/browser, media playback, or PDF feature.
-- [ ] The stock firmware does not already handle this well, **and** no other popular CrossPoint fork already does
-      (or, if one does, I explain why CrossPoint still needs it below).
+- [ ] The stock firmware does not already handle this well, **and** no other popular Borges fork already does
+      (or, if one does, I explain why Borges still needs it below).
 - [ ] If this PR touches `freeink-sdk/`, `lib/hal/`, the bootloader, OTA, or recovery code, I have coordinated with
       the relevant maintainer.
 
@@ -30,7 +30,7 @@ relevant Discussion or issue so reviewers can see the history.**
 
 ### AI Usage
 
-While CrossPoint doesn't have restrictions on AI tools in contributing, please be transparent about their usage as it
+While Borges doesn't have restrictions on AI tools in contributing, please be transparent about their usage as it
 helps set the right context for reviewers.
 
 Did you use AI tools to help write this code? _**< YES | PARTIALLY | NO >**_

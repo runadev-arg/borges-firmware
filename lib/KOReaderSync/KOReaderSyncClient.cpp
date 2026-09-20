@@ -10,9 +10,9 @@
 
 #include "KOReaderCredentialStore.h"
 #include "KOReaderSyncProtocol.h"
-#include "TotoCredentialStore.h"
-#include "TotoNetBoot.h"
-#include "TotoTrust.h"
+#include "BorgesCredentialStore.h"
+#include "BorgesNetBoot.h"
+#include "BorgesTrust.h"
 
 int KOReaderSyncClient::lastHttpCode = 0;
 int KOReaderSyncClient::lastProtocolCode = 0;
@@ -20,13 +20,13 @@ std::string KOReaderSyncClient::lastRequestId;
 std::string KOReaderSyncClient::lastEndpoint;
 std::string KOReaderSyncClient::lastTransportError;
 
-#ifndef CROSSPOINT_VERSION
-#define CROSSPOINT_VERSION "development"
+#ifndef BORGES_VERSION
+#define BORGES_VERSION "development"
 #endif
 
 namespace {
-// Device identifier for CrossPoint reader
-constexpr char DEVICE_NAME[] = "CrossPoint";
+// Device identifier for Borges reader
+constexpr char DEVICE_NAME[] = "Borges";
 constexpr char DEVICE_ID[] = "crosspoint-reader";
 
 // KOSync's TLS-1.3 servers can't be reached through the precompiled system
@@ -82,27 +82,27 @@ class Request {
   bool begin(const std::string& url) {
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.setReuse(false);
-    http.setUserAgent(std::string("CrossPoint-KOSync/") + CROSSPOINT_VERSION);
+    http.setUserAgent(std::string("Borges-KOSync/") + BORGES_VERSION);
 
     const std::string baseUrl = KOREADER_STORE.getBaseUrl();
     if (baseUrl.rfind("https://", 0) == 0) {
-      if (TOTO_CREDENTIALS.paired()) {
+      if (BORGES_CREDENTIALS.paired()) {
         std::string clockDetail;
-        if (!toto::ensureTrustedClock(&clockDetail)) {
+        if (!borges::ensureTrustedClock(&clockDetail)) {
           KOReaderSyncClient::lastTransportError =
               boundedDiagnostic(clockDetail.empty() ? "trusted-clock bootstrap failed" : clockDetail);
           LOG_ERR("KOSync", "Trusted TLS clock unavailable: %s", KOReaderSyncClient::lastTransportError.c_str());
           return false;
         }
-        http.setCACert(toto::rootCertificate());
+        http.setCACert(borges::rootCertificate());
       } else {
-        // Preserve standalone third-party KOSync compatibility when no Toto
+        // Preserve standalone third-party KOSync compatibility when no Borges
         // pairing exists to provide a pinned certificate and trusted clock.
         http.setInsecure();
       }
-      const std::string host = toto::netboot::hostFromBaseUrl(baseUrl);
+      const std::string host = borges::netboot::hostFromBaseUrl(baseUrl);
       if (host.empty()) return false;
-      const toto::netboot::Candidates candidates = toto::netboot::resolveServer(host.c_str());
+      const borges::netboot::Candidates candidates = borges::netboot::resolveServer(host.c_str());
       if (candidates.count == 0 || !http.begin(url)) return false;
       http.setServerAddress(candidates.ip[0]);
       return true;
@@ -110,7 +110,7 @@ class Request {
     return http.begin(url);
   }
 
-  toto::netboot::WifiFullPowerScope wifiFullPower;
+  borges::netboot::WifiFullPowerScope wifiFullPower;
   freeink::SecureHttpClient http;
 };
 

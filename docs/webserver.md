@@ -1,6 +1,6 @@
 # Web Server Guide
 
-This guide explains how to use CrossPoint Reader's built-in web server for file
+This guide explains how to use Borges Reader's built-in web server for file
 transfer, device settings, Wi-Fi/OPDS management, and SD-card font management.
 
 ## Overview
@@ -26,13 +26,13 @@ networks or in hotspot mode when you control who is connected.
 | Mode | Use when |
 |------|----------|
 | **Join Network** | You want the reader to join an existing Wi-Fi network. |
-| **Calibre Wireless** | You want to receive books from the CrossPoint Calibre plugin workflow. |
+| **Calibre Wireless** | You want to receive books from the Borges Calibre plugin workflow. |
 | **Create Hotspot** | You want the reader to create its own open Wi-Fi network. |
 
 ## Join Network Mode
 
 1. Select **Join Network**.
-2. If you have saved Wi-Fi credentials, CrossPoint first tries the last
+2. If you have saved Wi-Fi credentials, Borges first tries the last
    connected network, then other visible saved networks in signal-strength
    order. Press **Back** to cancel or **Confirm** to stop auto-connect and show
    the network list.
@@ -56,7 +56,7 @@ Use either URL from a phone, tablet, or computer on the same network.
 2. Connect your phone or computer to the open Wi-Fi network:
 
 ```text
-CrossPoint-Reader
+Borges-Reader
 ```
 
 3. Open the URL shown on the reader. `http://crosspoint.local/` is preferred
@@ -69,7 +69,7 @@ opening the web interface.
 
 Calibre Wireless starts the same web server in station mode, then displays setup
 instructions and upload progress on the reader. Use this mode with the
-CrossPoint Calibre plugin or other clients that speak the documented WebSocket
+Borges Calibre plugin or other clients that speak the documented WebSocket
 upload protocol.
 
 For Calibre OPDS browsing, add `/opds` to the catalog URL when configuring an

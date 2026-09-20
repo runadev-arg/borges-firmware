@@ -1,7 +1,7 @@
 /**
  * XtcReaderActivity.h
  *
- * XTC ebook reader activity for CrossPoint Reader
+ * XTC ebook reader activity for Borges Reader
  * Displays pre-rendered XTC pages on e-ink display
  */
 

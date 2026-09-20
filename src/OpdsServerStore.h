@@ -28,7 +28,7 @@ class OpdsServerStore : public PersistableStore<OpdsServerStore> {
   friend class PersistableStore<OpdsServerStore>;
 
  public:
-  static const char* getFilePath() { return "/.crosspoint/opds.json"; }
+  static const char* getFilePath() { return "/.borges/opds.json"; }
   void toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 

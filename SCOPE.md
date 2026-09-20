@@ -1,19 +1,19 @@
-# Project Vision & Scope: CrossPoint Reader
+# Project Vision & Scope: Borges Reader
 
-The goal of CrossPoint Reader is to create an efficient, open-source reading experience for ESP32-based e-reader devices. Xteink hardware (X3, X4) is where the project started and remains a primary target, but CrossPoint is explicitly broadening to support the wider ecosystem of small ESP32 e-ink readers. We believe a dedicated e-reader should do one thing exceptionally well: **facilitate focused reading.**
+The goal of Borges Reader is to create an efficient, open-source reading experience for ESP32-based e-reader devices. Xteink hardware (X3, X4) is where the project started and remains a primary target, but Borges is explicitly broadening to support the wider ecosystem of small ESP32 e-ink readers. We believe a dedicated e-reader should do one thing exceptionally well: **facilitate focused reading.**
 
 ## 1. Core Mission
 
 To provide a lightweight, high-performance firmware that maximizes the potential of ESP32-based e-reader hardware, prioritizing legibility, performance, and usability over "swiss-army-knife" functionality.
 
-CrossPoint is **not** a kitchen-sink firmware, and it is **not** Xteink-only. We want clean, maintainable code that the community can build on, and that runs across the range of ESP32 e-reader devices (ESP32-C3, ESP32-S3, and adjacent variants). Every accepted change should make that goal easier, not harder. Device-specific code should live behind the HAL / SDK boundary so the reader core stays portable.
+Borges is **not** a kitchen-sink firmware, and it is **not** Xteink-only. We want clean, maintainable code that the community can build on, and that runs across the range of ESP32 e-reader devices (ESP32-C3, ESP32-S3, and adjacent variants). Every accepted change should make that goal easier, not harder. Device-specific code should live behind the HAL / SDK boundary so the reader core stays portable.
 
 ## 2. Guiding Principle: Fill Gaps the Stock Firmware Leaves
 
-CrossPoint exists to do the things the stock firmware does poorly or not at all. New work is evaluated against that delineator:
+Borges exists to do the things the stock firmware does poorly or not at all. New work is evaluated against that delineator:
 
 * **Does the stock firmware already do this well?** We should hit that bar or surpass it 
-* **Is another popular CrossPoint fork already solving this well?** If yes, we generally defer to that fork if it's not part of the core reading experience. e.g. stats
+* **Is another popular Borges fork already solving this well?** If yes, we generally defer to that fork if it's not part of the core reading experience. e.g. stats
 * **Does this directly improve the reading experience or the firmware's long-term maintainability?** If no, it is out of scope.
 
 ## 3. Current Focus
@@ -32,7 +32,7 @@ During this period, the priorities are:
 PRs in the following areas will be closed until this notice is lifted. Adding these now makes the cleanup and multi-device work materially harder:
 
 * **New themes.** The existing theming surface is frozen. 
-* **New external network connectors.** This includes sync engines, cloud storage clients, OPDS extensions beyond what exists, remote file access, and any new "talk to a server" feature. We now have our own CrossPoint KOSync server which gives us a way to sync to 3rd party systems like Hardcover at an API level instead of bloating the firmware. If you're interested in helping here, the sync server is also open source.
+* **New external network connectors.** This includes sync engines, cloud storage clients, OPDS extensions beyond what exists, remote file access, and any new "talk to a server" feature. We now have our own Borges KOSync server which gives us a way to sync to 3rd party systems like Hardcover at an API level instead of bloating the firmware. If you're interested in helping here, the sync server is also open source.
 
 If you are unsure whether your idea falls into one of these categories, open a Discussion first.
 
@@ -53,7 +53,7 @@ If you are unsure whether your idea falls into one of these categories, open a D
 
 *Rejected because they compromise the device's stability, maintainability, or core mission.*
 
-* **Interactive Apps:** No notepads, calculators, or games. These belong in other forks and are not part of CrossPoint's focus. 
+* **Interactive Apps:** No notepads, calculators, or games. These belong in other forks and are not part of Borges's focus. 
 * **Writing / Authoring Tools:** No typed notes, journals, or editors. Input hardware and RAM are wrong for this, and other forks already explore this space. 
 * **Active Connectivity:** No RSS readers, news aggregators, or web browsers. Background Wi-Fi drains the battery and complicates the single-core CPU. 
 * **PDF Rendering:** PDFs are fixed-layout documents, so rendering them requires displaying pages as images rather than reflowable text, resulting in constant panning and zooming that makes for a poor reading experience on e-ink. Out of scope on the current hardware class.
@@ -72,7 +72,7 @@ We want to abstract themes out of the firmware entirely so they no longer consum
 
 ### Identifying Other Stock-Firmware Gaps
 
-We want help cataloguing things the stock firmware (and other popular CrossPoint forks) handle poorly or not at all, so future work has a clear target list. Particularly interested in:
+We want help cataloguing things the stock firmware (and other popular Borges forks) handle poorly or not at all, so future work has a clear target list. Particularly interested in:
 
 * **RTL (right-to-left) text support:** Arabic, Hebrew, Persian, and similar scripts. 
 * **Languages with poor stock and fork coverage:** Especially those that need shaping, complex layout, or non-Latin font work that nobody is handling well today. 
@@ -82,13 +82,13 @@ If you can read or use the device in one of these languages, your feedback (even
 
 ## 6. Funding and Contributor Sustainability
 
-CrossPoint uses [Royalty.dev](https://royalty.dev) (yes, a product built by [@itsthisjustin](https://github.com/itsthisjustin)) to fund contributors. There has been some tension in the community around this, so the intent is being clarified here directly.
+Borges uses [Royalty.dev](https://royalty.dev) (yes, a product built by [@itsthisjustin](https://github.com/itsthisjustin)) to fund contributors. There has been some tension in the community around this, so the intent is being clarified here directly.
 
 **Why we do this:**
 
 * To maintain long-term interest from contributors and maintainers, in direct response to substantial community requests for a way to give back. 
 * To motivate contributors to invest in the *core* project rather than spinning up competing forks. 
-* To help pay for new ESP32 devices so we can port CrossPoint to additional hardware. 
+* To help pay for new ESP32 devices so we can port Borges to additional hardware. 
 * To give the project a credible long-term path to sustainability.
 
 **How it works:**

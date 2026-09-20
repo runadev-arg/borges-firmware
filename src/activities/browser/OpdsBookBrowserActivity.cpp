@@ -8,8 +8,8 @@
 #include <OpdsStream.h>
 #include <WiFi.h>
 
-#include "CrossPointSettings.h"
-#include "CrossPointState.h"
+#include "BorgesSettings.h"
+#include "BorgesState.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"

@@ -15,7 +15,7 @@
 namespace {
 
 // Shared temp file for entries lazily extracted from .dict.dz.
-constexpr const char* DICT_TMP_FILE = "/.crosspoint/dict.tmp";
+constexpr const char* DICT_TMP_FILE = "/.borges/dict.tmp";
 
 // .qidx sidecar header: magic, version, sample interval, sample count, and the
 // .idx file size the sidecar was built from (staleness check).

@@ -1,4 +1,4 @@
-/* bidi_pairs.t — unified mirror + bracket table for CrossPoint.
+/* bidi_pairs.t — unified mirror + bracket table for Borges.
  *
  * Replaces both mirroring.t and brackets.t.  canonical.t is dropped
  * (fullwidth brackets are not used in Hebrew epub content).

@@ -25,7 +25,7 @@ const char* kRealisticPretty = R"({
   "node_id": "RE_kwDOAbCdEf4AADBN",
   "tag_name": "v2.4.1",
   "target_commitish": "main",
-  "name": "CrossPoint Reader v2.4.1",
+  "name": "Borges Reader v2.4.1",
   "draft": false,
   "prerelease": false,
   "created_at": "2026-04-28T10:00:00Z",
@@ -110,7 +110,7 @@ const char* kRealisticPretty = R"({
 })";
 
 const char* kRealisticMinified =
-    R"({"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/12345","assets_url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/12345/assets","id":12345,"author":{"login":"releasebot","id":99887766,"node_id":"MDQ6VXNlcjk5ODg3NzY2","type":"User","site_admin":false},"tag_name":"v2.4.1","target_commitish":"main","name":"CrossPoint Reader v2.4.1","draft":false,"prerelease":false,"assets":[{"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/assets/100001","id":100001,"name":"crosspoint-reader-v2.4.1-source.zip","uploader":{"login":"releasebot","id":99887766},"content_type":"application/zip","state":"uploaded","size":2048576,"download_count":42,"browser_download_url":"https://github.com/crosspoint-reader/crosspoint-reader/releases/download/v2.4.1/crosspoint-reader-v2.4.1-source.zip"},{"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/assets/100002","id":100002,"name":"firmware.bin","uploader":{"login":"releasebot","id":99887766},"content_type":"application/octet-stream","state":"uploaded","size":1572864,"download_count":187,"browser_download_url":"https://github.com/crosspoint-reader/crosspoint-reader/releases/download/v2.4.1/firmware.bin"},{"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/assets/100003","id":100003,"name":"checksums.sha256","uploader":{"login":"releasebot","id":99887766},"content_type":"text/plain","state":"uploaded","size":192,"download_count":15,"browser_download_url":"https://github.com/crosspoint-reader/crosspoint-reader/releases/download/v2.4.1/checksums.sha256"}],"body":"## What's Changed\n\n* Fixed orientation crash","reactions":{"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/12345/reactions","total_count":5,"+1":3}})";
+    R"({"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/12345","assets_url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/12345/assets","id":12345,"author":{"login":"releasebot","id":99887766,"node_id":"MDQ6VXNlcjk5ODg3NzY2","type":"User","site_admin":false},"tag_name":"v2.4.1","target_commitish":"main","name":"Borges Reader v2.4.1","draft":false,"prerelease":false,"assets":[{"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/assets/100001","id":100001,"name":"crosspoint-reader-v2.4.1-source.zip","uploader":{"login":"releasebot","id":99887766},"content_type":"application/zip","state":"uploaded","size":2048576,"download_count":42,"browser_download_url":"https://github.com/crosspoint-reader/crosspoint-reader/releases/download/v2.4.1/crosspoint-reader-v2.4.1-source.zip"},{"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/assets/100002","id":100002,"name":"firmware.bin","uploader":{"login":"releasebot","id":99887766},"content_type":"application/octet-stream","state":"uploaded","size":1572864,"download_count":187,"browser_download_url":"https://github.com/crosspoint-reader/crosspoint-reader/releases/download/v2.4.1/firmware.bin"},{"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/assets/100003","id":100003,"name":"checksums.sha256","uploader":{"login":"releasebot","id":99887766},"content_type":"text/plain","state":"uploaded","size":192,"download_count":15,"browser_download_url":"https://github.com/crosspoint-reader/crosspoint-reader/releases/download/v2.4.1/checksums.sha256"}],"body":"## What's Changed\n\n* Fixed orientation crash","reactions":{"url":"https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/12345/reactions","total_count":5,"+1":3}})";
 
 void feedChunked(ReleaseJsonParser& p, const char* json, size_t chunkSize) {
   size_t len = strlen(json);
@@ -599,16 +599,16 @@ TEST(ReleaseJsonParser, ChunkedRealisticEveryBoundary) {
   }
 }
 
-TEST(ReleaseJsonParser, OwnedTotoManifest) {
+TEST(ReleaseJsonParser, OwnedBorgesManifest) {
   const char* json = R"({
     "manifest_schema": 1,
     "product": "crosspoint-toto",
     "target": "xteink-x4-esp32c3",
     "channel": "stable",
-    "version": "1.4.1-toto.1",
+    "version": "1.4.1-borges.1",
     "sync_protocol_min": 2,
     "firmware": {
-      "url": "https://github.com/runadev-arg/crosspoint-toto/releases/download/toto-v1.4.1/firmware.bin",
+      "url": "https://github.com/runadev-arg/crosspoint-toto/releases/download/borges-v1.4.1/firmware.bin",
       "size": 5553824,
       "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     },
@@ -623,7 +623,7 @@ TEST(ReleaseJsonParser, OwnedTotoManifest) {
 
   EXPECT_TRUE(p.foundTag());
   EXPECT_TRUE(p.foundFirmware());
-  EXPECT_STREQ(p.getTagName(), "1.4.1-toto.1");
+  EXPECT_STREQ(p.getTagName(), "1.4.1-borges.1");
   EXPECT_STREQ(p.getProduct(), "crosspoint-toto");
   EXPECT_STREQ(p.getTarget(), "xteink-x4-esp32c3");
   EXPECT_STREQ(p.getChannel(), "stable");

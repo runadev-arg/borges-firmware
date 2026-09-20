@@ -4,7 +4,7 @@ Import("env")
 
 
 PROJECT_DIR = Path(env.subst("$PROJECT_DIR"))
-MARKER = "/* CrossPoint wolfSSL compatibility overrides */"
+MARKER = "/* Borges wolfSSL compatibility overrides */"
 OVERRIDES = f"""
 
 {MARKER}

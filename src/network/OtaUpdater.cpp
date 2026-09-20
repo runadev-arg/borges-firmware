@@ -15,11 +15,11 @@
 #include <string>
 
 namespace {
-constexpr char ownedManifestUrl[] = "https://highlights.runadev.com/api/releases/x4/stable/manifest.json";
-constexpr char ownedProduct[] = "crosspoint-toto";
+constexpr char ownedManifestUrl[] = "https://borges.runadev.com/api/releases/borges/x4/stable/manifest.json";
+constexpr char ownedProduct[] = "borges-firmware";
 constexpr char ownedTarget[] = "xteink-x4-esp32c3";
 constexpr char ownedChannel[] = "stable";
-constexpr char ownedFirmwarePrefix[] = "https://github.com/runadev-arg/crosspoint-toto/releases/download/";
+constexpr char ownedFirmwarePrefix[] = "https://github.com/runadev-arg/borges-firmware/releases/download/";
 constexpr uint32_t supportedManifestSchema = 1;
 constexpr uint32_t supportedSyncProtocol = 2;
 
@@ -29,7 +29,7 @@ bool startsWith(const char* value, const char* prefix) {
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
-  LOG_DBG("OTA", "Checking for update (current: %s)", CROSSPOINT_VERSION);
+  LOG_DBG("OTA", "Checking for update (current: %s)", BORGES_VERSION);
 
   // Stream the ~32KB release JSON straight into the parser as it arrives.
   // Buffering the whole body in a std::string would add a growing allocation
@@ -82,14 +82,14 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
 }
 
 bool OtaUpdater::isUpdateNewer() const {
-  if (!updateAvailable || latestVersion.empty() || latestVersion == CROSSPOINT_VERSION) {
+  if (!updateAvailable || latestVersion.empty() || latestVersion == BORGES_VERSION) {
     return false;
   }
 
   int currentMajor = 0, currentMinor = 0, currentPatch = 0;
   int latestMajor = 0, latestMinor = 0, latestPatch = 0;
 
-  const auto currentVersion = CROSSPOINT_VERSION;
+  const auto currentVersion = BORGES_VERSION;
 
   // semantic version check (only match on 3 segments)
   const char* latestStart = latestVersion.c_str();
@@ -127,13 +127,13 @@ bool OtaUpdater::isUpdateNewer() const {
     return true;
   }
 
-  int currentTotoRevision = 0;
-  int latestTotoRevision = 0;
-  const char* currentToto = strstr(currentStart, "-toto.");
-  const char* latestToto = strstr(latestStart, "-toto.");
-  if (currentToto && latestToto && sscanf(currentToto, "-toto.%d", &currentTotoRevision) == 1 &&
-      sscanf(latestToto, "-toto.%d", &latestTotoRevision) == 1) {
-    return latestTotoRevision > currentTotoRevision;
+  int currentBorgesRevision = 0;
+  int latestBorgesRevision = 0;
+  const char* currentBorges = strstr(currentStart, "-borges.");
+  const char* latestBorges = strstr(latestStart, "-borges.");
+  if (currentBorges && latestBorges && sscanf(currentBorges, "-borges.%d", &currentBorgesRevision) == 1 &&
+      sscanf(latestBorges, "-borges.%d", &latestBorgesRevision) == 1) {
+    return latestBorgesRevision > currentBorgesRevision;
   }
 
   return false;

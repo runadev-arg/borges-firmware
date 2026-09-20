@@ -9,8 +9,8 @@
 #include "EndOfBookOptions.h"
 #include "EpubReaderMenuActivity.h"
 #include "ProgressMapper.h"
-#include "TotoBookSyncActivity.h"
-#include "TotoDurableQueue.h"
+#include "BorgesBookSyncActivity.h"
+#include "BorgesDurableQueue.h"
 #include "activities/Activity.h"
 
 class EpubReaderActivity final : public Activity {
@@ -35,8 +35,8 @@ class EpubReaderActivity final : public Activity {
   bool pendingScreenshot = false;
   bool pendingSyncSaveError = false;
   bool pendingSyncQueueError = false;
-  std::optional<toto::ProgressInboxItem> pendingAppliedRemote;
-  bool totoTrackingReady = false;
+  std::optional<borges::ProgressInboxItem> pendingAppliedRemote;
+  bool borgesTrackingReady = false;
   unsigned long lastSyncQueueRetryMs = 0;
   bool remoteDecisionChecked = false;
   // Consecutive page-load failures. Each failure drops the section and rebuilds on the next render,
@@ -177,8 +177,8 @@ class EpubReaderActivity final : public Activity {
   // Returns true if sync acted (launched, or surfaced a save error); false if it was a no-op
   // because no KOReader credentials are stored.
   bool launchKOReaderSync();
-  bool launchTotoAutoSync();
-  bool launchTotoBookSync(TotoBookSyncActivity::Mode mode);
+  bool launchBorgesAutoSync();
+  bool launchBorgesBookSync(BorgesBookSyncActivity::Mode mode);
   void applyOrientation(uint8_t orientation);
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);
@@ -206,5 +206,5 @@ class EpubReaderActivity final : public Activity {
   bool skipLoopDelay() override { return section && section->isBuilding() && !buildHeapPaused; }
   bool isReaderActivity() const override { return true; }
   ScreenshotInfo getScreenshotInfo() const override;
-  CrossPointPosition getCurrentPosition() const;
+  BorgesPosition getCurrentPosition() const;
 };

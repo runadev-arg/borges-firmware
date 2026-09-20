@@ -18,8 +18,8 @@
 
 #include "../../util/BookmarkFile.h"
 #include "BookmarkEntry.h"
-#include "CrossPointSettings.h"
-#include "CrossPointState.h"
+#include "BorgesSettings.h"
+#include "BorgesState.h"
 #include "DictionaryWordSelectActivity.h"
 #include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
@@ -34,10 +34,10 @@
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
-#include "TotoBookmarkSync.h"
-#include "TotoDurableQueue.h"
-#include "TotoReadingEvents.h"
-#include "TotoSyncScheduler.h"
+#include "BorgesBookmarkSync.h"
+#include "BorgesDurableQueue.h"
+#include "BorgesReadingEvents.h"
+#include "BorgesSyncScheduler.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -137,7 +137,7 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
   }
 
   // Cache dir is keyed by hash of the epub path (see Epub ctor), so it must be re-keyed.
-  const std::string newCachePath = "/.crosspoint/epub_" + std::to_string(std::hash<std::string>{}(dstPath));
+  const std::string newCachePath = "/.borges/epub_" + std::to_string(std::hash<std::string>{}(dstPath));
   if (!oldCachePath.empty() && Storage.exists(oldCachePath.c_str())) {
     if (!Storage.rename(oldCachePath.c_str(), newCachePath.c_str())) {
       LOG_ERR("ERS", "Failed to rename cache dir %s -> %s (non-fatal)", oldCachePath.c_str(), newCachePath.c_str());
@@ -210,17 +210,17 @@ void EpubReaderActivity::onEnter() {
   APP_STATE.openEpubPath = epub->getPath();
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
-  const bool began = TOTO_READING_EVENTS.beginBook(epub->getPath(), epub->getTitle(), epub->getAuthor());
-  totoTrackingReady = began || (TOTO_READING_EVENTS.active() && !TOTO_READING_EVENTS.hasPendingProgress());
-  pendingSyncQueueError = !totoTrackingReady && TOTO_READING_EVENTS.hasPendingProgress();
+  const bool began = BORGES_READING_EVENTS.beginBook(epub->getPath(), epub->getTitle(), epub->getAuthor());
+  borgesTrackingReady = began || (BORGES_READING_EVENTS.active() && !BORGES_READING_EVENTS.hasPendingProgress());
+  pendingSyncQueueError = !borgesTrackingReady && BORGES_READING_EVENTS.hasPendingProgress();
   if (const auto remote =
-          totoTrackingReady ? TOTO_QUEUE.nextApplicableProgress(TOTO_READING_EVENTS.getBookHash()) : std::nullopt) {
+          borgesTrackingReady ? BORGES_QUEUE.nextApplicableProgress(BORGES_READING_EVENTS.getBookHash()) : std::nullopt) {
     const SavedProgressPosition saved{
         .xpath = remote->xpointer,
         .percentage = static_cast<float>(remote->percentage / 100.0),
     };
-    const CrossPointPosition mapped =
-        ProgressMapper::toCrossPoint(epub, saved, renderer, currentSpineIndex, cachedChapterTotalPageCount);
+    const BorgesPosition mapped =
+        ProgressMapper::toBorges(epub, saved, renderer, currentSpineIndex, cachedChapterTotalPageCount);
     if (mapped.spineIndex >= 0 && mapped.spineIndex < epub->getSpineItemsCount() && mapped.totalPages > 0 &&
         saveProgress(mapped.spineIndex, mapped.pageNumber, mapped.totalPages)) {
       currentSpineIndex = mapped.spineIndex;
@@ -228,12 +228,12 @@ void EpubReaderActivity::onEnter() {
       cachedSpineIndex = mapped.spineIndex;
       cachedChapterTotalPageCount = mapped.totalPages;
       pendingAppliedRemote = *remote;
-      if (TOTO_READING_EVENTS.recordPosition(saved.percentage, saved.xpath, true)) {
-        if (TOTO_QUEUE.resolveProgress(*remote)) pendingAppliedRemote.reset();
+      if (BORGES_READING_EVENTS.recordPosition(saved.percentage, saved.xpath, true)) {
+        if (BORGES_QUEUE.resolveProgress(*remote)) pendingAppliedRemote.reset();
       } else {
         pendingSyncQueueError = true;
       }
-      LOG_INF("TOTO", "Applied durable remote progress for %s at %.1f%%", TOTO_READING_EVENTS.getBookHash().c_str(),
+      LOG_INF("BORGES", "Applied durable remote progress for %s at %.1f%%", BORGES_READING_EVENTS.getBookHash().c_str(),
               remote->percentage);
     }
   }
@@ -247,7 +247,7 @@ void EpubReaderActivity::onEnter() {
 void EpubReaderActivity::onExit() {
   Activity::onExit();
 
-  TOTO_READING_EVENTS.endBook();
+  BORGES_READING_EVENTS.endBook();
 
   // The extractor holds a raw pointer to this activity's epub; drop it before
   // the activity (and the shared_ptr) goes away.
@@ -359,26 +359,26 @@ void EpubReaderActivity::loop() {
   if (millis() - lastSyncQueueRetryMs >= 10000U && !RenderLock::peek()) {
     RenderLock lock(*this);
     lastSyncQueueRetryMs = millis();
-    if (TOTO_READING_EVENTS.hasPendingProgress()) {
-      pendingSyncQueueError = !TOTO_READING_EVENTS.retryPendingProgress();
+    if (BORGES_READING_EVENTS.hasPendingProgress()) {
+      pendingSyncQueueError = !BORGES_READING_EVENTS.retryPendingProgress();
       requestUpdate();
     }
   }
 
-  if (pendingAppliedRemote.has_value() && !TOTO_READING_EVENTS.hasPendingProgress() && !RenderLock::peek()) {
+  if (pendingAppliedRemote.has_value() && !BORGES_READING_EVENTS.hasPendingProgress() && !RenderLock::peek()) {
     RenderLock lock(*this);
-    if (TOTO_QUEUE.resolveProgress(*pendingAppliedRemote)) {
+    if (BORGES_QUEUE.resolveProgress(*pendingAppliedRemote)) {
       pendingAppliedRemote.reset();
     }
   }
 
   // Ask once after the first page is rendered. Declining keeps the durable
-  // location available from Toto Sync and does not require a network connection.
-  if (totoTrackingReady && !remoteDecisionChecked && lastRenderCompleteMs != 0 && section && !RenderLock::peek()) {
+  // location available from Borges and does not require a network connection.
+  if (borgesTrackingReady && !remoteDecisionChecked && lastRenderCompleteMs != 0 && section && !RenderLock::peek()) {
     remoteDecisionChecked = true;
-    if (const auto remote = TOTO_QUEUE.nextProgressDecision(TOTO_READING_EVENTS.getBookHash())) {
+    if (const auto remote = BORGES_QUEUE.nextProgressDecision(BORGES_READING_EVENTS.getBookHash())) {
       char summary[96];
-      std::snprintf(summary, sizeof(summary), tr(STR_TOTO_RESUME_AT), remote->percentage);
+      std::snprintf(summary, sizeof(summary), tr(STR_BORGES_RESUME_AT), remote->percentage);
       const std::string prompt =
           remote->sourceDeviceName.empty() ? std::string(summary) : remote->sourceDeviceName + " — " + summary;
       auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_APPLY_REMOTE), prompt);
@@ -389,7 +389,7 @@ void EpubReaderActivity::loop() {
       }
       startActivityForResult(std::move(confirmation), [this, remote](const ActivityResult& result) {
         if (result.isCancelled) {
-          if (!TOTO_QUEUE.dismissProgress(*remote)) pendingSyncSaveError = true;
+          if (!BORGES_QUEUE.dismissProgress(*remote)) pendingSyncSaveError = true;
           requestUpdate();
           return;
         }
@@ -397,12 +397,12 @@ void EpubReaderActivity::loop() {
                                           .percentage = static_cast<float>(remote->percentage / 100.0)};
         // Persist consent before changing the local position. If SD queueing
         // fails later, reopening retries this accepted intent after a reboot.
-        if (!TOTO_QUEUE.acceptProgress(*remote)) {
+        if (!BORGES_QUEUE.acceptProgress(*remote)) {
           pendingSyncSaveError = true;
           requestUpdate();
           return;
         }
-        const auto mapped = ProgressMapper::toCrossPoint(epub, saved, renderer, currentSpineIndex,
+        const auto mapped = ProgressMapper::toBorges(epub, saved, renderer, currentSpineIndex,
                                                          section ? section->estimatedTotalPages() : 0);
         if (mapped.spineIndex < 0 || mapped.spineIndex >= epub->getSpineItemsCount() || mapped.totalPages <= 0 ||
             !saveProgress(mapped.spineIndex, mapped.pageNumber, mapped.totalPages)) {
@@ -416,8 +416,8 @@ void EpubReaderActivity::loop() {
         cachedChapterTotalPageCount = mapped.totalPages;
         section.reset();
         pendingAppliedRemote = *remote;
-        if (TOTO_READING_EVENTS.recordPosition(saved.percentage, saved.xpath, true)) {
-          if (TOTO_QUEUE.resolveProgress(*remote)) pendingAppliedRemote.reset();
+        if (BORGES_READING_EVENTS.recordPosition(saved.percentage, saved.xpath, true)) {
+          if (BORGES_QUEUE.resolveProgress(*remote)) pendingAppliedRemote.reset();
         } else {
           pendingSyncQueueError = true;
         }
@@ -430,7 +430,7 @@ void EpubReaderActivity::loop() {
   constexpr unsigned long AUTO_SYNC_SETTLE_MS = 5000;
   const bool pageSettled = lastRenderCompleteMs != 0 && millis() - lastRenderCompleteMs >= AUTO_SYNC_SETTLE_MS &&
                            !automaticPageTurnActive && footnoteDepth == 0;
-  if (TOTO_SYNC_SCHEDULER.readerSyncDue(pageSettled, section && section->isBuilding()) && launchTotoAutoSync()) {
+  if (BORGES_SYNC_SCHEDULER.readerSyncDue(pageSettled, section && section->isBuilding()) && launchBorgesAutoSync()) {
     return;
   }
 
@@ -635,7 +635,7 @@ void EpubReaderActivity::loop() {
   // Long-press Confirm runs the user-selected function (SETTINGS.longPressMenuFunction).
   if (mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
     switch (SETTINGS.longPressMenuFunction) {
-      case CrossPointSettings::LP_MENU_BOOKMARK:
+      case BorgesSettings::LP_MENU_BOOKMARK:
         // Hold ~0.4s drops a bookmark at the current page.
         if (mappedInput.getHeldTime() >= ReaderUtils::BOOKMARK_HOLD_MS && !showBookmarkMessage) {
           addBookmark();
@@ -645,7 +645,7 @@ void EpubReaderActivity::loop() {
           requestUpdate();
         }
         break;
-      case CrossPointSettings::LP_MENU_KOSYNC:
+      case BorgesSettings::LP_MENU_KOSYNC:
         // Hold ~1s launches KOReader sync. If sync can't run (no credentials stored), fall
         // through so the normal Confirm-release still opens the reader menu.
         if (mappedInput.getHeldTime() >= ReaderUtils::GO_HOME_MS) {
@@ -655,7 +655,7 @@ void EpubReaderActivity::loop() {
           }
         }
         break;
-      case CrossPointSettings::LP_MENU_DICTIONARY:
+      case BorgesSettings::LP_MENU_DICTIONARY:
         // Hold ~0.4s starts dictionary word selection on the current page.
         if (mappedInput.getHeldTime() >= ReaderUtils::BOOKMARK_HOLD_MS && !showDictionaryMessage) {
           ignoreNextConfirmRelease = true;  // Prevent menu open on the release that follows
@@ -663,7 +663,7 @@ void EpubReaderActivity::loop() {
           return;
         }
         break;
-      case CrossPointSettings::LP_MENU_DISABLED:
+      case BorgesSettings::LP_MENU_DISABLED:
       default:
         break;
     }
@@ -684,7 +684,7 @@ void EpubReaderActivity::loop() {
   // auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
 
   // Handle short power button press for footnotes
-  if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::FOOTNOTES &&
+  if (SETTINGS.shortPwrBtn == BorgesSettings::SHORT_PWRBTN::FOOTNOTES &&
       mappedInput.wasReleased(MappedInputManager::Button::Power) &&
       !mappedInput.wasReleased(MappedInputManager::Button::Down)) {
     if (footnoteDepth > 0) {
@@ -862,8 +862,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
 
       if (!cachedPageMatchesActiveSection && sync.hasSavedProgress) {
         const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
-        CrossPointPosition fallback =
-            ProgressMapper::toCrossPoint(epub, {sync.xpath, sync.percentage}, renderer, currentSpineIndex, totalPages);
+        BorgesPosition fallback =
+            ProgressMapper::toBorges(epub, {sync.xpath, sync.percentage}, renderer, currentSpineIndex, totalPages);
         targetSpineIndex = fallback.spineIndex;
         targetPage = fallback.pageNumber;
       }
@@ -982,15 +982,15 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC: {
-      launchTotoBookSync(TotoBookSyncActivity::Mode::Sync);
+      launchBorgesBookSync(BorgesBookSyncActivity::Mode::Sync);
       break;
     }
     case EpubReaderMenuActivity::MenuAction::FETCH_LATEST: {
-      launchTotoBookSync(TotoBookSyncActivity::Mode::Latest);
+      launchBorgesBookSync(BorgesBookSyncActivity::Mode::Latest);
       break;
     }
     case EpubReaderMenuActivity::MenuAction::FETCH_OTHER: {
-      launchTotoBookSync(TotoBookSyncActivity::Mode::LatestOther);
+      launchBorgesBookSync(BorgesBookSyncActivity::Mode::LatestOther);
       break;
     }
     case EpubReaderMenuActivity::MenuAction::BOOKMARKS: {
@@ -1021,7 +1021,7 @@ bool EpubReaderActivity::launchKOReaderSync() {
   }
 
   // Pre-compute local KO position and chapter name while Epub is still in RAM.
-  CrossPointPosition localPos = getCurrentPosition();
+  BorgesPosition localPos = getCurrentPosition();
   SavedProgressPosition localKoPos = ProgressMapper::toSavedProgress(epub, localPos);
   const int tocIdx = epub->getTocIndexForSpineIndex(currentSpineIndex);
   std::string localChapterName = (tocIdx >= 0) ? epub->getTocItem(tocIdx).title : "";
@@ -1058,7 +1058,7 @@ bool EpubReaderActivity::launchKOReaderSync() {
   return true;  // acted: launched the sync activity
 }
 
-bool EpubReaderActivity::launchTotoBookSync(TotoBookSyncActivity::Mode mode) {
+bool EpubReaderActivity::launchBorgesBookSync(BorgesBookSyncActivity::Mode mode) {
   if (!epub) return false;
   const int page = section ? section->currentPage : nextPageNumber;
   const int pages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
@@ -1076,14 +1076,14 @@ bool EpubReaderActivity::launchTotoBookSync(TotoBookSyncActivity::Mode mode) {
     requestUpdate();
     return false;
   }
-  auto activity = makeUniqueNoThrow<TotoBookSyncActivity>(renderer, mappedInput, path, hash, mode);
+  auto activity = makeUniqueNoThrow<BorgesBookSyncActivity>(renderer, mappedInput, path, hash, mode);
   if (!activity) {
     pendingSyncSaveError = true;
     requestUpdate();
     return false;
   }
   // Do not synthesize a new reading timestamp merely because Sync was pressed.
-  if (!TOTO_READING_EVENTS.retryPendingProgress() || !TOTO_READING_EVENTS.endBook()) {
+  if (!BORGES_READING_EVENTS.retryPendingProgress() || !BORGES_READING_EVENTS.endBook()) {
     pendingSyncQueueError = true;
     requestUpdate();
     return false;
@@ -1098,20 +1098,20 @@ bool EpubReaderActivity::launchTotoBookSync(TotoBookSyncActivity::Mode mode) {
   return true;
 }
 
-bool EpubReaderActivity::launchTotoAutoSync() {
+bool EpubReaderActivity::launchBorgesAutoSync() {
   if (!epub) return false;
 
   const int currentPage = section ? section->currentPage : nextPageNumber;
   const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
   const std::string savedEpubPath = epub->getPath();
   if (!saveProgress(currentSpineIndex, currentPage, totalPages)) {
-    LOG_ERR("TOTO", "Deferring automatic sync because current progress could not be saved");
+    LOG_ERR("BORGES", "Deferring automatic sync because current progress could not be saved");
     pendingSyncSaveError = true;
     requestUpdate();
     return false;
   }
 
-  if (!TOTO_READING_EVENTS.retryPendingProgress()) {
+  if (!BORGES_READING_EVENTS.retryPendingProgress()) {
     pendingSyncQueueError = true;
     requestUpdate();
     return false;
@@ -1121,16 +1121,16 @@ bool EpubReaderActivity::launchTotoAutoSync() {
   // like the physically verified manual sync path, then reopen the same book.
   // The outbox was committed before this point and survives any network error
   // or reboot; a successful pull is applied from the durable inbox on re-entry.
-  LOG_INF("TOTO", "Starting automatic reader sync (heap before release: %u)", (unsigned)ESP.getFreeHeap());
-  TOTO_READING_EVENTS.endBook();
+  LOG_INF("BORGES", "Starting automatic reader sync (heap before release: %u)", (unsigned)ESP.getFreeHeap());
+  BORGES_READING_EVENTS.endBook();
   {
     RenderLock lock(*this);
     ImageBlock::setExtractor(nullptr, nullptr);
     section.reset();
     epub.reset();
   }
-  LOG_DBG("TOTO", "Reader released for automatic sync (heap: %u)", (unsigned)ESP.getFreeHeap());
-  TOTO_SYNC_SCHEDULER.syncNow(4);
+  LOG_DBG("BORGES", "Reader released for automatic sync (heap: %u)", (unsigned)ESP.getFreeHeap());
+  BORGES_SYNC_SCHEDULER.syncNow(4);
   activityManager.goToReader(savedEpubPath);
   return true;
 }
@@ -1613,8 +1613,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       lastSavedSpineIndex = currentSpineIndex;
       lastSavedPage = section->currentPage;
       lastSavedPageCount = section->estimatedTotalPages();
-      const SavedProgressPosition totoPosition = ProgressMapper::toSavedProgress(epub, getCurrentPosition());
-      if (totoTrackingReady && !TOTO_READING_EVENTS.recordPosition(totoPosition.percentage, totoPosition.xpath)) {
+      const SavedProgressPosition borgesPosition = ProgressMapper::toSavedProgress(epub, getCurrentPosition());
+      if (borgesTrackingReady && !BORGES_READING_EVENTS.recordPosition(borgesPosition.percentage, borgesPosition.xpath)) {
         pendingSyncQueueError = true;
       }
     }
@@ -1960,7 +1960,7 @@ void EpubReaderActivity::renderStatusBar() const {
       textYOffset += UITheme::getInstance().getMetrics().statusBarVerticalMargin;
     }
 
-  } else if (sb.titleMode == CrossPointSettings::STATUS_BAR_TITLE::CHAPTER_TITLE) {
+  } else if (sb.titleMode == BorgesSettings::STATUS_BAR_TITLE::CHAPTER_TITLE) {
     title = tr(STR_UNNAMED);
     const int tocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
     if (tocIndex != -1) {
@@ -1968,7 +1968,7 @@ void EpubReaderActivity::renderStatusBar() const {
       title = tocItem.title;
     }
 
-  } else if (sb.titleMode == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE) {
+  } else if (sb.titleMode == BorgesSettings::STATUS_BAR_TITLE::BOOK_TITLE) {
     title = epub->getTitle();
   }
 
@@ -2046,7 +2046,7 @@ void EpubReaderActivity::loadCachedBookmarks() {
   }
 
   BookmarkFile::load(epub->getPath(), cachedBookmarks);
-  TOTO_BOOKMARK_SYNC.reconcile(epub->getPath(), epub->getTitle(), epub->getAuthor(), cachedBookmarks,
+  BORGES_BOOKMARK_SYNC.reconcile(epub->getPath(), epub->getTitle(), epub->getAuthor(), cachedBookmarks,
                                BookmarkFile::save);
   updateBookmarkFlag();
 }
@@ -2071,12 +2071,12 @@ void EpubReaderActivity::addBookmark() {
   for (const BookmarkEntry& bookmark : cachedBookmarks) {
     if (bookmarkMatchesProgress(bookmark, currentSpineIndex, currentPage, pageCount, pageRange)) {
       deletionReady =
-          TOTO_BOOKMARK_SYNC.enqueueLocalDelete(epub->getPath(), epub->getTitle(), epub->getAuthor(), bookmark) &&
+          BORGES_BOOKMARK_SYNC.enqueueLocalDelete(epub->getPath(), epub->getTitle(), epub->getAuthor(), bookmark) &&
           deletionReady;
     }
   }
   if (!deletionReady) {
-    LOG_ERR("ERS", "Bookmark deletion not committed to Toto outbox");
+    LOG_ERR("ERS", "Bookmark deletion not committed to Borges outbox");
     return;
   }
 
@@ -2102,8 +2102,8 @@ void EpubReaderActivity::addBookmark() {
     entry.computedSpineIndex = currentSpineIndex;
     entry.computedChapterPageCount = pageCount;
     entry.computedChapterProgress = currentPage;
-    if (!TOTO_BOOKMARK_SYNC.enqueueLocalUpsert(epub->getPath(), epub->getTitle(), epub->getAuthor(), entry, pageText)) {
-      LOG_ERR("ERS", "Bookmark saved locally; Toto outbox will retry on reopen");
+    if (!BORGES_BOOKMARK_SYNC.enqueueLocalUpsert(epub->getPath(), epub->getTitle(), epub->getAuthor(), entry, pageText)) {
+      LOG_ERR("ERS", "Bookmark saved locally; Borges outbox will retry on reopen");
     }
     cachedBookmarks.insert(cachedBookmarks.begin(), entry);
     bookmarkRemoved = false;
@@ -2149,7 +2149,7 @@ ScreenshotInfo EpubReaderActivity::getScreenshotInfo() const {
   return info;
 }
 
-CrossPointPosition EpubReaderActivity::getCurrentPosition() const {
+BorgesPosition EpubReaderActivity::getCurrentPosition() const {
   const int currentPage = section ? section->currentPage : nextPageNumber;
   const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
   std::optional<uint16_t> paragraphIndex;
@@ -2161,7 +2161,7 @@ CrossPointPosition EpubReaderActivity::getCurrentPosition() const {
     }
   }
 
-  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPages};
+  BorgesPosition localPos = {currentSpineIndex, currentPage, totalPages};
   if (paragraphIndex.has_value()) {
     localPos.paragraphIndex = *paragraphIndex;
     localPos.hasParagraphIndex = true;

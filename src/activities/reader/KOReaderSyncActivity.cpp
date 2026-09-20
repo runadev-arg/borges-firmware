@@ -68,7 +68,7 @@ void syncTimeWithNTP() {
 void KOReaderSyncActivity::ensureEpubLoaded() {
   if (!epub) {
     LOG_DBG("KOSync", "Loading epub for progress mapping (heap: %u)", (unsigned)ESP.getFreeHeap());
-    epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+    epub = std::make_shared<Epub>(epubPath, "/.borges");
     epub->setupCacheDir();
     // Load metadata only (no CSS needed for progress mapping, don't rebuild if cache is missing).
     if (!epub->load(false, true)) {
@@ -232,9 +232,9 @@ void KOReaderSyncActivity::performSync() {
   }
 
   // Prefer the exact spine/page from a crosspoint-sync rich position (lossless
-  // CrossPoint<->CrossPoint sync); fall back to the approximate XPath mapping
+  // Borges<->Borges sync); fall back to the approximate XPath mapping
   // for plain kosync servers or when the rich position cannot be applied.
-  std::optional<CrossPointPosition> richMapped;
+  std::optional<BorgesPosition> richMapped;
   if (remoteProgress.position.has_value()) {
     richMapped = ProgressMapper::fromRichPosition(epub, *remoteProgress.position, renderer);
   }
@@ -242,7 +242,7 @@ void KOReaderSyncActivity::performSync() {
     remotePosition = *richMapped;
   } else {
     SavedProgressPosition koPos = {remoteProgress.progress, remoteProgress.percentage};
-    remotePosition = ProgressMapper::toCrossPoint(epub, koPos, renderer, currentSpineIndex, totalPagesInSpine);
+    remotePosition = ProgressMapper::toBorges(epub, koPos, renderer, currentSpineIndex, totalPagesInSpine);
   }
 
   if (smartSyncEnabled()) {
@@ -284,8 +284,8 @@ void KOReaderSyncActivity::performUpload() {
   progress.progress = localProgress.xpath;
   progress.percentage = localProgress.percentage;
 
-  // Rich CrossPoint position for crosspoint-sync servers (lossless
-  // CrossPoint<->CrossPoint sync); plain kosync servers ignore the extra field.
+  // Rich Borges position for crosspoint-sync servers (lossless
+  // Borges<->Borges sync); plain kosync servers ignore the extra field.
   {
     KOReaderRichPosition pos;
     const float pct = localProgress.percentage < 0.0f   ? 0.0f

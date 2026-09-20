@@ -1,0 +1,18 @@
+name: Borges checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure native tests
+        run: cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build native tests
+        run: cmake --build build/test -j 4
+      - name: Test migration, sync and reader behavior
+        run: ctest --test-dir build/test --output-on-failure -j 4

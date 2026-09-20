@@ -7,7 +7,7 @@
 
 #include "../../util/BookmarkFile.h"
 #include "MappedInputManager.h"
-#include "TotoBookmarkSync.h"
+#include "BorgesBookmarkSync.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -28,7 +28,7 @@ void EpubReaderBookmarksActivity::onEnter() {
   if (!BookmarkFile::load(epubPath, bookmarks)) {
     bookmarks.shrink_to_fit();
   }
-  TOTO_BOOKMARK_SYNC.reconcile(epubPath, epub->getTitle(), epub->getAuthor(), bookmarks, BookmarkFile::save);
+  BORGES_BOOKMARK_SYNC.reconcile(epubPath, epub->getTitle(), epub->getAuthor(), bookmarks, BookmarkFile::save);
   LOG_DBG("EPB", "Loaded %d bookmarks for book: %s", static_cast<int>(bookmarks.size()), epubPath.c_str());
 
   // Trigger first update
@@ -174,9 +174,9 @@ void EpubReaderBookmarksActivity::loop() {
 }
 
 void EpubReaderBookmarksActivity::deleteSelectedBookmark() {
-  if (!TOTO_BOOKMARK_SYNC.enqueueLocalDelete(epubPath, epub->getTitle(), epub->getAuthor(),
+  if (!BORGES_BOOKMARK_SYNC.enqueueLocalDelete(epubPath, epub->getTitle(), epub->getAuthor(),
                                              bookmarks.at(selectorIndex))) {
-    LOG_ERR("EPB", "Bookmark deletion not committed to Toto outbox");
+    LOG_ERR("EPB", "Bookmark deletion not committed to Borges outbox");
     return;
   }
   bookmarks.erase(bookmarks.begin() + selectorIndex);
@@ -233,8 +233,8 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
     auto tocIndex = epub->getTocIndexForSpineIndex(bookmark.computedSpineIndex);
     auto tocTitle = (tocIndex >= 0) ? (epub->getTocItem(tocIndex)).title : tr(STR_UNNAMED);
     std::string subtitle;
-    if (bookmark.totoConflict) subtitle = std::string(tr(STR_TOTO_SYNC_CONFLICT)) + " - ";
-    if (!bookmark.totoNote.empty()) subtitle += bookmark.totoNote + " - ";
+    if (bookmark.borgesConflict) subtitle = std::string(tr(STR_BORGES_SYNC_CONFLICT)) + " - ";
+    if (!bookmark.borgesNote.empty()) subtitle += bookmark.borgesNote + " - ";
     subtitle += std::to_string((int)(std::clamp(bookmark.percentage, 0.0f, 1.0f) * 100.0f + 0.5f)) + "% - ";
     if (bookmark.computedChapterPageCount > 0) {
       subtitle += std::to_string(bookmark.computedChapterProgress + 1) + "/" +

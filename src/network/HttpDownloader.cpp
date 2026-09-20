@@ -12,9 +12,9 @@
 #include <string>
 
 #include "DownloadPolicy.h"
-#include "TotoCredentialStore.h"
-#include "TotoNetBoot.h"
-#include "TotoTrust.h"
+#include "BorgesCredentialStore.h"
+#include "BorgesNetBoot.h"
+#include "BorgesTrust.h"
 
 #if defined(FREEINK_NET_WOLFSSL)
 #include <SecureHttpClient.h>
@@ -53,17 +53,17 @@ bool isRedirect(int status) {
 HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std::string& username,
                                          const std::string& password, Sink& sink) {
   std::string url = startUrl;
-  toto::netboot::WifiFullPowerScope fullPower;
+  borges::netboot::WifiFullPowerScope fullPower;
   const bool cinabrio =
-      TOTO_CREDENTIALS.paired() && download_policy::sameOrigin(startUrl, TOTO_CREDENTIALS.getBaseUrl());
+      BORGES_CREDENTIALS.paired() && download_policy::sameOrigin(startUrl, BORGES_CREDENTIALS.getBaseUrl());
 
   for (int hop = 0; hop <= MAX_REDIRECTS; ++hop) {
     freeink::SecureHttpClient http;
     http.setTimeout(HTTP_TIMEOUT_MS);
     // Pairing tokens and canonical books require the same verified trust as sync.
     if (cinabrio) {
-      if (!toto::ensureTrustedClock()) return HttpDownloader::HTTP_ERROR;
-      http.setCACert(toto::rootCertificate());
+      if (!borges::ensureTrustedClock()) return HttpDownloader::HTTP_ERROR;
+      http.setCACert(borges::rootCertificate());
     } else {
       http.setInsecure();
     }
@@ -72,15 +72,15 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
       return HttpDownloader::HTTP_ERROR;
     }
     if (cinabrio) {
-      const std::string host = toto::netboot::hostFromBaseUrl(TOTO_CREDENTIALS.getBaseUrl());
-      const auto candidates = toto::netboot::resolveServer(host.c_str());
+      const std::string host = borges::netboot::hostFromBaseUrl(BORGES_CREDENTIALS.getBaseUrl());
+      const auto candidates = borges::netboot::resolveServer(host.c_str());
       if (candidates.count == 0) return HttpDownloader::HTTP_ERROR;
       http.setServerAddress(candidates.ip[0]);
     }
     // setUserAgent replaces SecureHttpClient's built-in UA; addHeader would
     // append a second User-Agent header, which strict servers reject (aiohttp
     // answers 400 "Duplicate 'User-Agent' header found").
-    http.setUserAgent("CrossPoint-ESP32-" CROSSPOINT_VERSION);
+    http.setUserAgent("Borges-ESP32-" BORGES_VERSION);
     if (!username.empty() && !password.empty()) {
       const std::string credentials = username + ":" + password;
       const String encoded = base64::encode(credentials.c_str());
@@ -160,7 +160,7 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
     return HttpDownloader::HTTP_ERROR;
   }
 
-  esp_http_client_set_header(client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
+  esp_http_client_set_header(client, "User-Agent", "Borges-ESP32-" BORGES_VERSION);
   if (!username.empty() && !password.empty()) {
     // Preemptive Basic auth, like the prior addHeader; don't wait for a 401.
     const std::string credentials = username + ":" + password;
@@ -364,7 +364,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
 
   contentHash.calculate();
 #if defined(FREEINK_NET_WOLFSSL)
-  const bool canonical = TOTO_CREDENTIALS.paired() && download_policy::sameOrigin(url, TOTO_CREDENTIALS.getBaseUrl()) &&
+  const bool canonical = BORGES_CREDENTIALS.paired() && download_policy::sameOrigin(url, BORGES_CREDENTIALS.getBaseUrl()) &&
                          url.find("/api/opds/books/") != std::string::npos;
   if (canonical && sink.contentSha256.size() != 64) {
     LOG_ERR("HTTP", "Canonical EPUB is missing its integrity checksum");
