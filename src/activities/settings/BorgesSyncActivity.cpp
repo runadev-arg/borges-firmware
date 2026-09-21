@@ -2,80 +2,56 @@
 
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <WiFi.h>
 
 #include <array>
 #include <cstdio>
 
-#include "MappedInputManager.h"
 #include "BorgesCredentialStore.h"
 #include "BorgesDurableQueue.h"
 #include "BorgesPairingClient.h"
 #include "BorgesSyncClient.h"
+#include "MappedInputManager.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
-namespace {
-constexpr int MENU_ITEMS = 4;
-}
+namespace fui = freeink::ui;
 
 void BorgesSyncActivity::onEnter() {
-  Activity::onEnter();
-  selectedIndex = 0;
+  UiListActivity::onEnter();
+  nav.selected = 0;
   working = false;
   resultText.clear();
   refreshDecision();
   requestUpdate();
 }
 
-void BorgesSyncActivity::loop() {
-  if (working) {
-    requestUpdateAndWait();
-    performPendingAction();
-    return;
-  }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-    finish();
-    return;
-  }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    activate();
-    return;
-  }
+bool BorgesSyncActivity::handleCustomInput() {
+  if (!working) return false;
+  requestUpdateAndWait();
+  performPendingAction();
+  return true;
+}
 
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int contentTop = metrics.topPadding + metrics.headerHeight + 86;
-  const int contentHeight =
-      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-  int touched = selectedIndex;
-  const auto touch = handleListTouch(touched, MENU_ITEMS, contentTop, contentHeight, false);
-  if (touch != ListTouchResult::None) {
-    selectedIndex = touched;
-    if (touch == ListTouchResult::Activated) activate();
-    return;
-  }
-
-  navigator.onNext([this] {
-    selectedIndex = (selectedIndex + 1) % MENU_ITEMS;
-    requestUpdate();
-  });
-  navigator.onPrevious([this] {
-    selectedIndex = (selectedIndex + MENU_ITEMS - 1) % MENU_ITEMS;
-    requestUpdate();
-  });
+void BorgesSyncActivity::activateIndex(int index) {
+  if (working || index < 0 || index >= MENU_ITEMS) return;
+  nav.selected = index;
+  app.clearTapFlash();
+  activate();
 }
 
 void BorgesSyncActivity::activate() {
-  if (selectedIndex == 0) {
+  if (nav.selected == 0) {
     ensureWifiThen(Action::PairOrClaim);
-  } else if (selectedIndex == 1 && BORGES_CREDENTIALS.paired()) {
+  } else if (nav.selected == 1 && BORGES_CREDENTIALS.paired()) {
     ensureWifiThen(Action::Sync);
-  } else if (selectedIndex == 2 && progressDecision) {
+  } else if (nav.selected == 2 && progressDecision) {
     pendingAction = Action::AcceptProgress;
     working = true;
     requestUpdate();
-  } else if (selectedIndex == 3 && progressDecision) {
+  } else if (nav.selected == 3 && progressDecision) {
     pendingAction = Action::DismissProgress;
     working = true;
     requestUpdate();
@@ -93,16 +69,21 @@ void BorgesSyncActivity::ensureWifiThen(Action action) {
     requestUpdate();
     return;
   }
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) {
-                           if (result.isCancelled || WiFi.status() != WL_CONNECTED) {
-                             resultText = tr(STR_BORGES_WIFI_REQUIRED);
-                             requestUpdate();
-                             return;
-                           }
-                           working = true;
-                           requestUpdate();
-                         });
+  auto wifi = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput);
+  if (!wifi) {
+    resultText = tr(STR_BORGES_FAILED);
+    requestUpdate();
+    return;
+  }
+  startActivityForResult(std::move(wifi), [this](const ActivityResult& result) {
+    if (result.isCancelled || WiFi.status() != WL_CONNECTED) {
+      resultText = tr(STR_BORGES_WIFI_REQUIRED);
+      requestUpdate();
+      return;
+    }
+    working = true;
+    requestUpdate();
+  });
 }
 
 void BorgesSyncActivity::performPendingAction() {
@@ -110,8 +91,8 @@ void BorgesSyncActivity::performPendingAction() {
     if (BORGES_CREDENTIALS.paired()) {
       resultText = borges::bootstrapBorgesServices() ? tr(STR_BORGES_PAIR_SUCCESS) : tr(STR_BORGES_FAILED);
     } else {
-      const auto result =
-          BORGES_CREDENTIALS.pairingPending() ? borges::PairingClient::pollAndClaim() : borges::PairingClient::request();
+      const auto result = BORGES_CREDENTIALS.pairingPending() ? borges::PairingClient::pollAndClaim()
+                                                              : borges::PairingClient::request();
       if (result == borges::PairingClient::Result::OK || result == borges::PairingClient::Result::PENDING) {
         resultText = tr(STR_BORGES_PAIR_PENDING);
       } else if (result == borges::PairingClient::Result::PAIRED) {
@@ -159,11 +140,9 @@ void BorgesSyncActivity::performPendingAction() {
 
 void BorgesSyncActivity::refreshDecision() { progressDecision = BORGES_QUEUE.nextProgressDecision({}, true); }
 
-void BorgesSyncActivity::render(RenderLock&&) {
-  renderer.clearScreen();
+void BorgesSyncActivity::drawChrome() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
-  const int height = renderer.getScreenHeight();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, width, metrics.headerHeight}, tr(STR_BORGES_SYNC));
 
   const int summaryTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
@@ -203,32 +182,35 @@ void BorgesSyncActivity::render(RenderLock&&) {
       lineY += renderer.getLineHeight(UI_10_FONT_ID);
     }
   }
+}
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight + 86;
-  const int contentHeight = height - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-  GUI.drawList(
-      renderer, Rect{0, contentTop, width, contentHeight}, MENU_ITEMS, selectedIndex,
-      [](int index) {
-        if (index == 0) {
-          if (BORGES_CREDENTIALS.paired()) return std::string(tr(STR_BORGES_REPAIR_SERVICES));
-          return std::string(BORGES_CREDENTIALS.pairingPending() ? tr(STR_BORGES_CHECK_PAIRING) : tr(STR_BORGES_PAIR_DEVICE));
-        }
-        if (index == 1) return std::string(tr(STR_BORGES_SYNC_NOW));
-        if (index == 2) return std::string(tr(STR_BORGES_ACCEPT_RESUME));
-        return std::string(tr(STR_BORGES_DISMISS_RESUME));
-      },
-      nullptr, nullptr,
-      [this](int index) {
-        if (index == 1 && !BORGES_CREDENTIALS.paired()) return std::string("[") + tr(STR_BORGES_NOT_PAIRED) + "]";
-        if (index >= 2 && !progressDecision) return std::string("[") + tr(STR_BORGES_NONE) + "]";
-        return std::string();
-      },
-      true);
-
-  if (working) {
-    GUI.drawPopup(renderer, tr(STR_BORGES_WORKING));
+void BorgesSyncActivity::buildScreen(UiScreen& screen) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  screen.setContentMarginFromScreen(
+      fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight + 140), 0,
+                  static_cast<int16_t>(metrics.buttonHintsHeight + metrics.verticalSpacing), 0});
+  rowItems[0].label = BORGES_CREDENTIALS.paired() ? tr(STR_BORGES_REPAIR_SERVICES)
+                                                  : (BORGES_CREDENTIALS.pairingPending() ? tr(STR_BORGES_CHECK_PAIRING)
+                                                                                         : tr(STR_BORGES_PAIR_DEVICE));
+  rowItems[1].label = tr(STR_BORGES_SYNC_NOW);
+  rowItems[2].label = tr(STR_BORGES_ACCEPT_RESUME);
+  rowItems[3].label = tr(STR_BORGES_DISMISS_RESUME);
+  for (int index = 0; index < MENU_ITEMS; ++index) {
+    rowItems[index].actionValue = static_cast<int16_t>(index);
+    rowItems[index].value = index == 1 && !BORGES_CREDENTIALS.paired()
+                                ? tr(STR_BORGES_NOT_PAIRED)
+                                : (index >= 2 && !progressDecision ? tr(STR_BORGES_NONE) : "");
   }
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  renderer.displayBuffer();
+  fui::ListProps props;
+  props.items = rowItems.data();
+  props.count = MENU_ITEMS;
+  props.action = ACTION_ROW;
+  props.inputMask = fui::InputTouch;
+  syncListViewport(screen, props);
+  screen.list(props);
+}
+
+void BorgesSyncActivity::drawFooter() {
+  if (working) GUI.drawPopup(renderer, tr(STR_BORGES_WORKING));
+  UiListActivity::drawFooter();
 }
