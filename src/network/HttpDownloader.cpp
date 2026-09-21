@@ -7,6 +7,7 @@
 #include <base64.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
+#include <esp_wifi.h>
 
 #include <functional>
 #include <string>
@@ -49,9 +50,27 @@ bool isRedirect(int status) {
   return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
 
+// OtaUpdater.cpp already disables WiFi power-save for firmware downloads, but
+// OPDS feed/book fetches never did despite being able to run just as long for
+// a large category. Modem sleep periodically powers the radio down between
+// DTIM beacon intervals, which can drop or stall packets mid-transfer -- more
+// likely to be hit the longer a transfer takes, so small feeds mostly get
+// away with it while a large category consistently doesn't.
+struct WifiPowerSaveGuard {
+  WifiPowerSaveGuard() {
+    esp_err_t err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (err != ESP_OK) LOG_ERR("HTTP", "Failed to disable WiFi power-save: %d", err);
+  }
+  ~WifiPowerSaveGuard() {
+    esp_err_t err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    if (err != ESP_OK) LOG_ERR("HTTP", "Failed to restore WiFi power-save: %d", err);
+  }
+};
+
 #if defined(FREEINK_NET_WOLFSSL)
 HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std::string& username,
-                                         const std::string& password, Sink& sink) {
+                                         const std::string& password, Sink& sink, bool downgradeRedirectsToHttp) {
+  WifiPowerSaveGuard psGuard;
   std::string url = startUrl;
   toto::netboot::WifiFullPowerScope fullPower;
   const bool cinabrio =
@@ -140,6 +159,7 @@ HttpDownloader::DownloadError runGetWolf(const std::string& startUrl, const std:
 HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
                                      Sink& sink) {
   const bool requireHttps = url.rfind("https://", 0) == 0;
+  WifiPowerSaveGuard psGuard;
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.buffer_size = HTTP_RX_BUF;
@@ -251,10 +271,14 @@ HttpDownloader::DownloadError runGet(const std::string& url, const std::string& 
 // mbedTLS path fails to connect or stalls mid-stream. Plain-http URLs still use a
 // WiFiClient inside runGetWolf, so this is safe for non-TLS targets too.
 HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::string& username,
-                                           const std::string& password, Sink& sink) {
+                                           const std::string& password, Sink& sink,
+                                           bool downgradeRedirectsToHttp = false) {
 #if defined(FREEINK_NET_WOLFSSL)
-  return runGetWolf(url, username, password, sink);
+  return runGetWolf(url, username, password, sink, downgradeRedirectsToHttp);
 #else
+  // esp_http_client follows redirects internally; the downgrade only exists on
+  // the wolfSSL path, where the manual hop loop exposes the Location URL.
+  (void)downgradeRedirectsToHttp;
   return runGet(url, username, password, sink);
 #endif
 }
@@ -303,7 +327,8 @@ bool HttpDownloader::fetchUrlVerified(const std::string& url, const DataCallback
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool* cancelFlag,
-                                                             const std::string& username, const std::string& password) {
+                                                             const std::string& username, const std::string& password,
+                                                             bool downgradeRedirectsToHttp) {
   LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());
 
   // A book can be several MB and the radio may disappear mid-transfer. Keep
@@ -346,7 +371,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     contentHash.add(data, len);
     return true;
   };
-  const DownloadError result = runGetSecure(url, username, password, sink);
+  const DownloadError result = runGetSecure(url, username, password, sink, false);
   if (result == OK) file.flush();
   // Close before remove/rename; DESTRUCTOR_CLOSES_FILE would otherwise close
   // only after those directory operations.

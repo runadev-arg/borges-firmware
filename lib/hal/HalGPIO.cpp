@@ -1,38 +1,17 @@
+#include <BatteryMonitor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <PowerManager.h>
 #include <Preferences.h>
 #include <SPI.h>
 #include <Wire.h>
+#include <XteinkDetect.h>
 #include <esp_sleep.h>
 
 // Global HalGPIO instance
 HalGPIO gpio;
 
 namespace X3GPIO {
-
-struct X3ProbeResult {
-  bool bq27220 = false;
-  bool ds3231 = false;
-  bool qmi8658 = false;
-
-  uint8_t score() const {
-    return static_cast<uint8_t>(bq27220) + static_cast<uint8_t>(ds3231) + static_cast<uint8_t>(qmi8658);
-  }
-};
-
-bool readI2CReg8(uint8_t addr, uint8_t reg, uint8_t* outValue) {
-  Wire.beginTransmission(addr);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-  if (Wire.requestFrom(addr, static_cast<uint8_t>(1), static_cast<uint8_t>(true)) < 1) {
-    return false;
-  }
-  *outValue = Wire.read();
-  return true;
-}
 
 bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue) {
   Wire.beginTransmission(addr);
@@ -59,58 +38,6 @@ bool readBQ27220CurrentMA(int16_t* outCurrent) {
   }
   *outCurrent = static_cast<int16_t>(raw);
   return true;
-}
-
-bool probeBQ27220Signature() {
-  uint16_t soc = 0;
-  uint16_t voltageMv = 0;
-  if (!readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_SOC_REG, &soc)) {
-    return false;
-  }
-  if (soc > 100) {
-    return false;
-  }
-  if (!readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_VOLT_REG, &voltageMv)) {
-    return false;
-  }
-  return voltageMv >= 2500 && voltageMv <= 5000;
-}
-
-bool probeDS3231Signature() {
-  uint8_t sec = 0;
-  if (!readI2CReg8(I2C_ADDR_DS3231, DS3231_SEC_REG, &sec)) {
-    return false;
-  }
-  const uint8_t tensDigit = (sec >> 4) & 0x07;
-  const uint8_t onesDigit = sec & 0x0F;
-
-  return tensDigit <= 5 && onesDigit <= 9;
-}
-
-bool probeQMI8658Signature() {
-  uint8_t whoami = 0;
-  if (readI2CReg8(I2C_ADDR_QMI8658, QMI8658_WHO_AM_I_REG, &whoami) && whoami == QMI8658_WHO_AM_I_VALUE) {
-    return true;
-  }
-  if (readI2CReg8(I2C_ADDR_QMI8658_ALT, QMI8658_WHO_AM_I_REG, &whoami) && whoami == QMI8658_WHO_AM_I_VALUE) {
-    return true;
-  }
-  return false;
-}
-
-X3ProbeResult runX3ProbePass() {
-  X3ProbeResult result;
-  Wire.begin(X3_I2C_SDA, X3_I2C_SCL, X3_I2C_FREQ);
-  Wire.setTimeOut(6);
-
-  result.bq27220 = probeBQ27220Signature();
-  result.ds3231 = probeDS3231Signature();
-  result.qmi8658 = probeQMI8658Signature();
-
-  Wire.end();
-  pinMode(20, INPUT);
-  pinMode(0, INPUT);
-  return result;
 }
 
 }  // namespace X3GPIO
@@ -163,24 +90,19 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
     return nvsToDeviceType(cachedValue);
   }
 
-  // No cache yet: run active X3 fingerprint probe and persist result.
-  const X3GPIO::X3ProbeResult pass1 = X3GPIO::runX3ProbePass();
-  delay(2);
-  const X3GPIO::X3ProbeResult pass2 = X3GPIO::runX3ProbePass();
+  // No cache yet: use FreeInk's canonical two-pass X3 fingerprint and persist
+  // only confirmed results. Inconclusive probes deliberately remain uncached.
+  uint8_t score1 = 0;
+  uint8_t score2 = 0;
+  const freeink::XteinkVerdict verdict = freeink::detectXteinkVerdict(&score1, &score2);
+  LOG_INF("HW", "Xteink probe scores: pass1=%u pass2=%u verdict=%u", score1, score2, static_cast<unsigned>(verdict));
 
-  const uint8_t score1 = pass1.score();
-  const uint8_t score2 = pass2.score();
-  LOG_INF("HW", "X3 probe scores: pass1=%u(bq=%d rtc=%d imu=%d) pass2=%u(bq=%d rtc=%d imu=%d)", score1, pass1.bq27220,
-          pass1.ds3231, pass1.qmi8658, score2, pass2.bq27220, pass2.ds3231, pass2.qmi8658);
-  const bool x3Confirmed = (score1 >= 2) && (score2 >= 2);
-  const bool x4Confirmed = (score1 == 0) && (score2 == 0);
-
-  if (x3Confirmed) {
+  if (verdict == freeink::XteinkVerdict::X3Confirmed) {
     writeNvsDeviceValue(NVS_KEY_DEV_CACHED, NvsDeviceValue::X3);
     return HalGPIO::DeviceType::X3;
   }
 
-  if (x4Confirmed) {
+  if (verdict == freeink::XteinkVerdict::X4Confirmed) {
     writeNvsDeviceValue(NVS_KEY_DEV_CACHED, NvsDeviceValue::X4);
     return HalGPIO::DeviceType::X4;
   }
@@ -193,10 +115,19 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
 
 void HalGPIO::begin() {
 #if FREEINK_MCU_C3
-  SPI.begin(EPD_SCLK, SPI_MISO, EPD_MOSI, EPD_CS);
-
   _deviceType = detectDeviceTypeWithFingerprint();
   BoardConfig::selectDevice(deviceIsX3() ? BoardConfig::Board::XteinkX3 : BoardConfig::Board::XteinkX4);
+
+  // Resolve the per-batch controller before SPI owns the display pins. FreeInk
+  // checks the OEM hw_calib/screenType value first, then falls back to its
+  // two-pass display-bus probe. X3's facade keys panel selection off the sibling
+  // board profile, so preserve a detected UC8279 through setDisplayX3().
+  freeink::applyXteinkDisplayController();
+  if (deviceIsX3() && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279) {
+    BoardConfig::selectDevice(BoardConfig::Board::XteinkX3Uc8279);
+  }
+
+  SPI.begin(EPD_SCLK, SPI_MISO, EPD_MOSI, EPD_CS);
 
   if (deviceIsX4()) {
     pinMode(BAT_GPIO0, INPUT);
@@ -233,15 +164,27 @@ unsigned long HalGPIO::getPowerButtonHeldTime() const { return inputMgr.getPower
 
 bool HalGPIO::hasTouch() const { return inputMgr.hasTouch(); }
 
+bool HalGPIO::hasHomeKey() const { return BoardConfig::hasHomeKey(); }
+
+bool HalGPIO::wasHomeKeyTapped() const { return inputMgr.wasHomeKeyTapped(); }
+
+bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
+
 bool HalGPIO::wasTouchTap(float& nx, float& ny) const { return inputMgr.wasTouchTap(nx, ny); }
 
 bool HalGPIO::wasTouchDown(float& nx, float& ny) const { return inputMgr.wasTouchPressedAt(nx, ny); }
+
+bool HalGPIO::wasTouchReleased() const { return inputMgr.wasTouchReleased(); }
 
 bool HalGPIO::isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) const {
   return inputMgr.isTouchTapCandidate(nx, ny, heldMs);
 }
 
 bool HalGPIO::isTouchHeldAt(float& nx, float& ny) const { return inputMgr.isTouchHeldAt(nx, ny); }
+
+bool HalGPIO::wasTouchLongPress(float& nx, float& ny) const { return inputMgr.wasTouchLongPress(nx, ny); }
+
+void HalGPIO::suppressTouchContact() { inputMgr.suppressTouchContact(); }
 
 unsigned long HalGPIO::lastTouchHeldMs() const { return inputMgr.lastTouchHeldMs(); }
 
@@ -255,50 +198,37 @@ void HalGPIO::setSharedConfirmPowerShortPressEmitsPower(const bool enabled) {
   InputManager::setSharedConfirmPowerShortPressEmitsPower(enabled);
 }
 
+bool HalGPIO::hasEdgeSideButtons() const {
+  return BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3 ||
+         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||
+         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Pro ||
+         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Classic;
+}
+
 bool HalGPIO::isXteinkDevice() const {
   return BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3 ||
+         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||
          BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4;
 }
 
-bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPressAllowed) {
-  // Boards without a power button (or M5Paper's latch circuit) cannot verify a
-  // hold; treat the wake as valid.
-  if (BoardConfig::ACTIVE.input.power < 0) {
+bool HalGPIO::verifyPowerButtonWakeup() {
+  // M5Paper v1.1: the classic ESP32's reset-to-setup() latency exceeds a normal
+  // wheel click, so a click wake is always released before this samples and
+  // verification would re-sleep on every wake. Its wheel has hard external
+  // pull-ups, so the ghost-wake debounce this implements is not needed.
+  if (BoardConfig::isPaperMono() || BoardConfig::isM5PaperV11() || BoardConfig::ACTIVE.input.power < 0) {
     return true;
   }
-#if defined(FREEINK_DEVICE_M5PAPER) && FREEINK_DEVICE_M5PAPER
-  return true;
-#endif
-  if (shortPressAllowed) {
-    // Fast path - no duration check needed
-    return true;
-  }
-  // TODO: Intermittent edge case remains: a single tap followed by another single tap
-  // can still power on the device. Tighten wake debounce/state handling here.
 
-  // Calibrate: subtract boot time already elapsed, assuming button held since boot.
-  const unsigned long calibration = millis();
-  const unsigned long calibratedDuration = (calibration < requiredDurationMs) ? (requiredDurationMs - calibration) : 1;
-
-  const auto start = millis();
+  constexpr unsigned long POWER_WAKE_STABILITY_MS = 10;
+  const bool heldAtFirstSample = inputMgr.isPowerButtonPhysicallyPressed();
+  const unsigned long sampleStart = millis();
   inputMgr.update();
-  // inputMgr.isPressed() may take up to ~500ms to return correct state
-  while (!inputMgr.isPressed(BTN_POWER) && millis() - start < 1000) {
-    delay(10);
+  while (millis() - sampleStart < POWER_WAKE_STABILITY_MS || inputMgr.isDebouncePending()) {
+    delay(1);
     inputMgr.update();
   }
-  if (inputMgr.isPressed(BTN_POWER)) {
-    do {
-      delay(10);
-      inputMgr.update();
-    } while (inputMgr.isPressed(BTN_POWER) && inputMgr.getPowerButtonHeldTime() < calibratedDuration);
-    if (inputMgr.getPowerButtonHeldTime() < calibratedDuration) {
-      return false;
-    }
-  } else {
-    return false;
-  }
-  return true;
+  return heldAtFirstSample && inputMgr.isPowerButtonPhysicallyPressed();
 }
 
 bool HalGPIO::isUsbConnected() const {
@@ -314,10 +244,28 @@ bool HalGPIO::isUsbConnected() const {
     }
     return false;
   }
-  if (BoardConfig::ACTIVE.usbDetect < 0) {
-    return false;
+  if (BoardConfig::ACTIVE.usbDetect >= 0) {
+    return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
   }
-  return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
+  // No digital USB-detect line (e.g. Sticky, whose PWR_IN_VOLT is an analog
+  // divider): infer external power from charging state instead. BatteryMonitor
+  // picks the board's best source — charger IC status, gauge Current() sign, or
+  // a /STAT pin — and reports false on boards with no battery telemetry at all.
+  // Caveat: charge termination at 100% reads as "not connected".
+  static const BatteryMonitor battery;
+  return battery.isCharging();
+}
+
+bool HalGPIO::coldBootImpliesPowerButton() const {
+  // Xteink-style power topology: the power button energizes the rail until
+  // firmware latches it, so a no-USB POWERON can only be a still-held button
+  // boot, and plugging USB into an off device should charge-sleep, not boot.
+  // Everything else boots on any cold boot: boards with no USB detection at
+  // all (M5Paper v1.1, PaperColor, Murphy, de-link) would misread USB and
+  // post-flash boots as battery button boots, and STAT-only boards like the
+  // EEGO A4 misread them the same way once the charger terminates at 100%
+  // (STAT inactive reads as "no USB").
+  return isXteinkDevice() || BoardConfig::isPaperMono() || BoardConfig::isSticky();
 }
 
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
@@ -330,7 +278,8 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
       (wakeupCause == ESP_SLEEP_WAKEUP_GPIO || wakeupCause == ESP_SLEEP_WAKEUP_EXT1)) {
     return WakeupReason::PowerButton;
   }
-  if (wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected) {
+  if (wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected &&
+      coldBootImpliesPowerButton()) {
     return WakeupReason::PowerButton;
   }
   if (wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_UNKNOWN && usbConnected) {

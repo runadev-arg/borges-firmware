@@ -6,7 +6,7 @@ All POD fields are written in the ESP32 little-endian representation used by
 
 ## `book.bin`
 
-### Version 7
+### Version 10
 
 `book.bin` stores EPUB metadata plus lookup tables for spine and TOC entries.
 The current firmware writes this version from `BookMetadataCache`.
@@ -18,7 +18,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 7
+#define EXPECTED_VERSION 10
 #define MAX_STRING_LENGTH 65535
 
 struct String {
@@ -90,11 +90,60 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Version 30
+### Version 45
+
+Version 45 keeps the version 44 serialized layout unchanged. It was bumped
+because internal EPUB links now preserve CSS superscript and subscript styles,
+changing their cached word-style flags and page layout.
+
+### Version 44
 
 Each file in `sections/*.bin` stores one laid-out spine section. The header is
 also the cache-busting key: if any layout-affecting setting differs from the
 current reader settings, the section is discarded and rebuilt.
+
+Version 44 appends the internal-link rectangles produced during text layout to
+each serialized page. The reader uses these rectangles for touch navigation;
+older caches are rebuilt because they contain no link geometry.
+
+Version 43 keeps the version 42 serialized layout unchanged. It was bumped
+because paragraph base direction now excludes direction changes from inline
+elements.
+
+Version 42 keeps the version 41 serialized layout unchanged. It was bumped
+because closing a block now strips inherited vertical margins and padding.
+
+Version 41 keeps the version 40 serialized layout unchanged. It was bumped
+because simple HTML table rows are now laid out as positioned columns rather
+than flattened paragraphs with synthetic row/cell labels.
+
+Version 40 keeps the version 39 serialized layout unchanged. It was bumped
+because ruby groups now remain intact when large text blocks are soft-flushed.
+
+Version 39 keeps the version 38 serialized layout unchanged. It was bumped
+because image top margins are now clamped to keep full-height images within the
+page viewport.
+
+Version 38 keeps the version 37 serialized layout unchanged. It was bumped
+because Focus Reading now permits line breaks at visible hyphens and dashes
+and hyphenates focus-split words as a whole, changing cached page layout.
+
+Version 37 increases the fixed-size footnote href field from 96 to 256 bytes.
+This changes each serialized footnote record from 128 to 288 bytes, so older
+section caches must be discarded and rebuilt.
+
+Version 36 keeps the version 35 serialized layout unchanged. It was bumped
+because ruby and justified text positioning and CJK line breaking now use
+corrected word measurements, so version 35 cached page layouts no longer match.
+
+Version 35 adds a header offset and a `uint32_t` entry per page for the
+visible-text offset LUT. The other section LUTs remain unchanged.
+
+Version 34 is binary-identical to version 33. The version was bumped because
+word-gap suppression was narrowed to tokens glued together in the source: v33
+dropped the gap between any two words meeting at a CJK break opportunity, which
+collapsed the spaces between Hangul words, so v33 word positions no longer match
+what the layout engine now produces.
 
 Version 30 is binary-identical to version 29. The version was bumped because
 Arabic contextual shaping changed text measurement (`getTextAdvanceX` now
@@ -107,8 +156,9 @@ superscript, and subscript. The format also includes:
 - cache-busting fields for paragraph alignment, hyphenation, embedded CSS,
   image rendering mode, and Focus Reading
 - page offset LUT
+- per-page visible-text offset LUT (zero-based Unicode codepoints in `<body>`)
 - anchor-to-page map for fragment and footnote navigation
-- paragraph and list-item LUTs used by KOReader sync page refinement
+- paragraph and list-item LUTs retained for navigation and legacy sync fallback
 - optional per-word Focus Reading split metadata
 - per-page footnote entries
 - serialized word style bits for underline, strikethrough, superscript, and
@@ -125,10 +175,10 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 30
+#define EXPECTED_VERSION 41
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
-#define FOOTNOTE_HREF_LEN 96
+#define FOOTNOTE_HREF_LEN 256
 
 struct String {
     u32 length [[hidden, comment("String byte length")]];
@@ -207,6 +257,7 @@ struct TextBlock {
 
 struct ImageBlock {
     String imagePath;
+    String srcPath;
     s16 width;
     s16 height;
 };
@@ -293,6 +344,7 @@ struct SectionBin {
     u32 anchorMapOffset;
     u32 paragraphLutOffset;
     u32 listItemLutOffset;
+    u32 visibleTextLutOffset;
 
     Page pages[pageCount];
 
@@ -313,6 +365,10 @@ struct SectionBin {
 
     if (listItemLutOffset != 0 && paragraphLutOffset != 0) {
         u16 listItemIndex[paragraphLut.count] @ listItemLutOffset;
+    }
+
+    if (visibleTextLutOffset != 0) {
+	u32 visibleTextOffset[pageCount] @ visibleTextLutOffset;
     }
 };
 

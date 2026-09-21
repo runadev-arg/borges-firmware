@@ -24,6 +24,7 @@ class OtaUpdater {
     OOM_ERROR,
     INCOMPATIBLE_MANIFEST,
     INTEGRITY_ERROR,
+    WRONG_DEVICE_ERROR,
   };
 
   size_t getOtaSize() const { return otaSize; }
