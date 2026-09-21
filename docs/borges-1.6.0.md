@@ -27,9 +27,9 @@ Se mantiene Borges: ya dispone de cuentas, cola durable, revisiones, conflictos 
 
 ## Validación y límites
 
-- Backend: 100 pruebas unitarias y 40 pruebas con PostgreSQL 17 nativo; ruta comprobada dentro del contenedor desplegado. Consulta del libro afectado en producción: 23 ms en una transacción de solo lectura.
+- Backend: 100 pruebas unitarias y 26 pruebas con PostgreSQL 17 nativo; ruta comprobada dentro del contenedor desplegado. Consulta del libro afectado en producción: 16 ms en la comprobación final de solo lectura, recuperando primero KindlePaperWhite4 al 37,7622 %. La hora de lectura exacta/anclada prevalece sobre una subida tardía; relojes adelantados más de cinco minutos usan la recepción.
 - Firmware: suite nativa de 252 pruebas, incluyendo colas durables, migración, recuperación, guardado atómico, credenciales, KOSync y parsers.
-- Compilación: `pio run -e borges_release` para ESP32-C3. Integración y publicación sujetas a compilación exitosa.
+- Compilación: `pio run -e borges_release` para ESP32-C3. Exitosa: 5.821.824 bytes, dentro de la partición de 6.553.600 bytes. Commit compilado y etiquetado: `ae6313e2719a3f78fe123f682011427f4e666f5d`. SHA-256: `c6cf23ff8cd8510b369b3aecf3cb6e902b9a31afebc0ff399a6787c68480d4e1`. Descarga pública verificada.
 - El token antiguo guardado para una sonda HTTP devolvió 401; no se rotaron credenciales del usuario para realizar la prueba.
 - No se flasheó automáticamente un dispositivo inaccesible. Validación física pendiente: actualizar, abrir un libro, pasar páginas, esperar más de cinco segundos, traer la posición desde el menú, confirmar y comprobar que persiste tras suspender y reabrir.
 

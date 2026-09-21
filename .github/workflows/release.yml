@@ -1,9 +1,7 @@
 name: Compile Release
 
-# Builds every board's release firmware on tag push, with the .bin named
-# exactly as OtaUpdater requests it from the GitHub release: plain
-# firmware.bin for the C3 X4/X3 binary, firmware-<board>.bin for every other
-# board. Attach the artifacts' .bin files to the release as-is.
+# Builds the Borges C3 X4/X3 release artifact for a Borges version tag.
+# Other board environments are retained upstream but are not published here.
 
 on:
   push:
