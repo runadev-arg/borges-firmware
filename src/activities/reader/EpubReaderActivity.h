@@ -11,13 +11,13 @@
 #include <vector>
 
 #include "BookmarkEntry.h"
+#include "BorgesBookSyncActivity.h"
+#include "BorgesDurableQueue.h"
 #include "EpubReaderMenuActivity.h"
 #include "ProgressMapper.h"
-#include "TotoBookSyncActivity.h"
-#include "TotoDurableQueue.h"
-#include "activities/Activity.h"
 #include "ReaderActivity.h"
 #include "ReaderToolbarUi.h"
+#include "activities/Activity.h"
 #include "components/OptionPopup.h"
 
 class EpubReaderActivity final : public ReaderActivity {
@@ -40,8 +40,8 @@ class EpubReaderActivity final : public ReaderActivity {
   bool pendingScreenshot = false;
   bool pendingSyncSaveError = false;
   bool pendingSyncQueueError = false;
-  std::optional<toto::ProgressInboxItem> pendingAppliedRemote;
-  bool totoTrackingReady = false;
+  std::optional<borges::ProgressInboxItem> pendingAppliedRemote;
+  bool borgesTrackingReady = false;
   unsigned long lastSyncQueueRetryMs = 0;
   bool remoteDecisionChecked = false;
   // Consecutive page-load failures. Each failure drops the section and rebuilds on the next render,
@@ -161,8 +161,7 @@ class EpubReaderActivity final : public ReaderActivity {
   void activateMoreRow(int row);
   void openDictionaryWordSelect();
   bool launchKOReaderSync();
-  bool launchTotoAutoSync();
-  bool launchTotoBookSync(TotoBookSyncActivity::Mode mode);
+  bool launchBorgesBookSync(BorgesBookSyncActivity::Mode mode);
   unsigned long confirmLongPressThreshold() const;
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void loadCachedBookmarks();
@@ -206,5 +205,5 @@ class EpubReaderActivity final : public ReaderActivity {
   bool skipLoopDelay() override;
 
   ScreenshotInfo getScreenshotInfo() const override;
-  CrossPointPosition getCurrentPosition() const;
+  BorgesPosition getCurrentPosition() const;
 };

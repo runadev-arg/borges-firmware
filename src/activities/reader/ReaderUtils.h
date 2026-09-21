@@ -1,6 +1,6 @@
 #pragma once
 
-#include <CrossPointSettings.h>
+#include <BorgesSettings.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <HalTiltSensor.h>
@@ -25,16 +25,16 @@ enum ReaderTouchAction : freeink::ui::ActionId {
 
 inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
   switch (orientation) {
-    case CrossPointSettings::ORIENTATION::PORTRAIT:
+    case BorgesSettings::ORIENTATION::PORTRAIT:
       renderer.setOrientation(GfxRenderer::Orientation::Portrait);
       break;
-    case CrossPointSettings::ORIENTATION::LANDSCAPE_CW:
+    case BorgesSettings::ORIENTATION::LANDSCAPE_CW:
       renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
       break;
-    case CrossPointSettings::ORIENTATION::INVERTED:
+    case BorgesSettings::ORIENTATION::INVERTED:
       renderer.setOrientation(GfxRenderer::Orientation::PortraitInverted);
       break;
-    case CrossPointSettings::ORIENTATION::LANDSCAPE_CCW:
+    case BorgesSettings::ORIENTATION::LANDSCAPE_CCW:
       renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
       break;
     default:
@@ -61,7 +61,7 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   };
   const bool prev =
       tiltPrev || (pageButtonTriggered(MappedInputManager::Button::PageBack) || pageButtonTriggered(prevButton));
-  const bool powerTurn = SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::PAGE_TURN &&
+  const bool powerTurn = SETTINGS.shortPwrBtn == BorgesSettings::SHORT_PWRBTN::PAGE_TURN &&
                          input.wasReleased(MappedInputManager::Button::Power);
   const bool next = tiltNext || pageButtonTriggered(MappedInputManager::Button::PageForward) || powerTurn ||
                     pageButtonTriggered(nextButton);
@@ -80,7 +80,7 @@ inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInpu
     return result;
   }
 
-  if (SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_SWIPE) {
+  if (SETTINGS.touchReaderControls == BorgesSettings::TOUCH_READER_SWIPE) {
     // Horizontal swipes turn pages; taps remain free for the centered reader-menu
     // zone. A slow swipe never becomes a long-press chapter skip.
     const auto dir = input.wasSwipe();
@@ -103,7 +103,7 @@ inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInpu
   // Outer thirds only: the center column contains the reader-menu tap target
   // (isTouchMenuTap below), so it must not double as a page turn.
   const int16_t zoneWidth = width / 3;
-  const bool inverted = SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
+  const bool inverted = SETTINGS.touchReaderControls == BorgesSettings::TOUCH_READER_INVERTED_TAP;
   const freeink::ui::TapZone zones[] = {
       {freeink::ui::Rect{0, 0, zoneWidth, height}, inverted ? READER_TOUCH_NEXT : READER_TOUCH_PREV},
       {freeink::ui::Rect{static_cast<int16_t>(width - zoneWidth), 0, zoneWidth, height},
@@ -127,7 +127,7 @@ inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInpu
 // menu stays reachable through the key's long-press function.
 inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager& input) {
   if (!input.hasTouch()) return false;
-  if (SETTINGS.showReaderMenu != CrossPointSettings::READER_MENU_TAP) return false;
+  if (SETTINGS.showReaderMenu != BorgesSettings::READER_MENU_TAP) return false;
   int x = 0;
   int y = 0;
   if (!input.wasScreenTapped(x, y)) return false;
@@ -148,7 +148,7 @@ inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputMan
   if (input.wasMenuGesture()) return true;
   // Bottom-edge up-swipe variant: only selectable on home-key boards, where
   // Home is the capacitive key and the bottom edge is otherwise unused.
-  if (SETTINGS.showReaderMenu == CrossPointSettings::READER_MENU_SWIPE_UP && input.wasReaderMenuSwipeUp()) {
+  if (SETTINGS.showReaderMenu == BorgesSettings::READER_MENU_SWIPE_UP && input.wasReaderMenuSwipeUp()) {
     return true;
   }
   return isTouchMenuTap(renderer, input);

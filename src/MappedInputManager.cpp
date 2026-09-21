@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cstdlib>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "components/UITheme.h"
 
 namespace fui = freeink::ui;
@@ -88,22 +88,22 @@ bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint
     case Button::PageBack:
       // Reader page navigation uses side buttons and can be swapped via settings.
       switch (sideLayout) {
-        case CrossPointSettings::PREV_NEXT:
+        case BorgesSettings::PREV_NEXT:
           return (gpio.*fn)(isNavDirectionSwapped() ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP);
-        case CrossPointSettings::NEXT_PREV:
+        case BorgesSettings::NEXT_PREV:
           return (gpio.*fn)(isNavDirectionSwapped() ? HalGPIO::BTN_UP : HalGPIO::BTN_DOWN);
-        case CrossPointSettings::SIDE_BUTTONS_DISABLED:
+        case BorgesSettings::SIDE_BUTTONS_DISABLED:
         default:
           return false;
       }
     case Button::PageForward:
       // Reader page navigation uses side buttons and can be swapped via settings.
       switch (sideLayout) {
-        case CrossPointSettings::PREV_NEXT:
+        case BorgesSettings::PREV_NEXT:
           return (gpio.*fn)(isNavDirectionSwapped() ? HalGPIO::BTN_UP : HalGPIO::BTN_DOWN);
-        case CrossPointSettings::NEXT_PREV:
+        case BorgesSettings::NEXT_PREV:
           return (gpio.*fn)(isNavDirectionSwapped() ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP);
-        case CrossPointSettings::SIDE_BUTTONS_DISABLED:
+        case BorgesSettings::SIDE_BUTTONS_DISABLED:
         default:
           return false;
       }
@@ -297,7 +297,7 @@ bool MappedInputManager::wasLightPanelGesture() const {
 
 #if FREEINK_CAP_TOUCH
 bool MappedInputManager::wasPowerConfirmClick() const {
-  if (!gpio.hasTouch() || SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::PWR_CONFIRM) return false;
+  if (!gpio.hasTouch() || SETTINGS.shortPwrBtn != BorgesSettings::SHORT_PWRBTN::PWR_CONFIRM) return false;
   // Wait out the X4 Pro's frontlight double-click window before treating its
   // first release as Confirm. Other touch boards can use the release directly.
   if (BoardConfig::isX4Pro()) return powerConfirmClickFrame;

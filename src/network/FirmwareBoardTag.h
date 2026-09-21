@@ -3,14 +3,14 @@
 #include <cstddef>
 #include <cstdint>
 
-// Board-identity tag embedded in every CrossPoint image, plus a streaming
+// Board-identity tag embedded in every Borges image, plus a streaming
 // scanner the firmware update paths use to reject an image built for a
 // different board before it can boot and drive another device's pins. All the
 // S3 boards (sticky, x4pro, papermono, ...) share a chip_id, so the existing
 // esp_image_header chip check cannot tell them apart.
 //
 // The tag is "CROSSPOINT-BOARD-V1:<board>;" stored once in .rodata — the
-// scanner's needle references the same array, so a CrossPoint image contains
+// scanner's needle references the same array, so a Borges image contains
 // exactly one occurrence. Images without a tag (other projects, forks, older
 // releases) are allowed: the guard only rejects a tag naming a DIFFERENT
 // board.

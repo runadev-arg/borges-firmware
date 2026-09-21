@@ -16,7 +16,7 @@
 namespace {
 
 // Shared temp file for entries lazily extracted from .dict.dz.
-constexpr const char* DICT_TMP_FILE = "/.crosspoint/dict.tmp";
+constexpr const char* DICT_TMP_FILE = "/.borges/dict.tmp";
 
 // Slack required above a definition buffer before we commit to reading it, so a
 // request that would only just fit is refused rather than left to abort mid-read.

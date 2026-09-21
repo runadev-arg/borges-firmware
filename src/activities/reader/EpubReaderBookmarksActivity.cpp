@@ -6,8 +6,8 @@
 #include <algorithm>
 
 #include "../../util/BookmarkFile.h"
+#include "BorgesBookmarkSync.h"
 #include "MappedInputManager.h"
-#include "TotoBookmarkSync.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
@@ -34,7 +34,7 @@ void EpubReaderBookmarksActivity::onEnter() {
   if (!BookmarkFile::load(epubPath, bookmarks)) {
     bookmarks.shrink_to_fit();
   }
-  TOTO_BOOKMARK_SYNC.reconcile(epubPath, epub->getTitle(), epub->getAuthor(), bookmarks, BookmarkFile::save);
+  BORGES_BOOKMARK_SYNC.reconcile(epubPath, epub->getTitle(), epub->getAuthor(), bookmarks, BookmarkFile::save);
   LOG_DBG("EPB", "Loaded %d bookmarks for book: %s", static_cast<int>(bookmarks.size()), epubPath.c_str());
   rebuildBookmarkRowItems();
 }
@@ -54,7 +54,10 @@ void EpubReaderBookmarksActivity::rebuildBookmarkRowItems() {
   for (const auto& bookmark : bookmarks) {
     const auto tocIndex = epub->getTocIndexForSpineIndex(bookmark.computedSpineIndex);
     const auto tocTitle = (tocIndex >= 0) ? epub->getTocItem(tocIndex).title : tr(STR_UNNAMED);
-    std::string subtitle = std::to_string((int)(std::clamp(bookmark.percentage, 0.0f, 1.0f) * 100.0f + 0.5f)) + "% - ";
+    std::string subtitle;
+    if (bookmark.borgesConflict) subtitle = std::string(tr(STR_BORGES_SYNC_CONFLICT)) + " - ";
+    if (!bookmark.borgesNote.empty()) subtitle += bookmark.borgesNote + " - ";
+    subtitle += std::to_string((int)(std::clamp(bookmark.percentage, 0.0f, 1.0f) * 100.0f + 0.5f)) + "% - ";
     if (bookmark.computedChapterPageCount > 0) {
       subtitle += std::to_string(bookmark.computedChapterProgress + 1) + "/" +
                   std::to_string(bookmark.computedChapterPageCount) + " - ";
@@ -169,9 +172,9 @@ void EpubReaderBookmarksActivity::showDeleteConfirmation() {
 }
 
 void EpubReaderBookmarksActivity::deleteSelectedBookmark() {
-  if (!TOTO_BOOKMARK_SYNC.enqueueLocalDelete(epubPath, epub->getTitle(), epub->getAuthor(),
-                                             bookmarks.at(nav.selected))) {
-    LOG_ERR("EPB", "Bookmark deletion not committed to Toto outbox");
+  if (!BORGES_BOOKMARK_SYNC.enqueueLocalDelete(epubPath, epub->getTitle(), epub->getAuthor(),
+                                               bookmarks.at(nav.selected))) {
+    LOG_ERR("EPB", "Bookmark deletion not committed to Borges outbox");
     return;
   }
   bookmarks.erase(bookmarks.begin() + nav.selected);

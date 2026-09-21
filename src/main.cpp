@@ -1,3 +1,4 @@
+#include "BorgesMigration.h"
 #include <Arduino.h>
 #include <BoardConfig.h>
 #include <Epub.h>
@@ -24,16 +25,16 @@
 
 #include <cstring>
 
-#include "CrossPointSettings.h"
-#include "CrossPointState.h"
+#include "BorgesSettings.h"
+#include "BorgesState.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
-#include "TotoCredentialStore.h"
-#include "TotoDurableQueue.h"
-#include "TotoSyncScheduler.h"
+#include "BorgesCredentialStore.h"
+#include "BorgesDurableQueue.h"
+#include "BorgesSyncScheduler.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
@@ -233,7 +234,7 @@ bool handleX4ProFrontlightDoubleClick() {
   return true;
 }
 
-constexpr char SLEEP_FRAME_FILE[] = "/.crosspoint/sleep_frame.bin";
+constexpr char SLEEP_FRAME_FILE[] = "/.borges/sleep_frame.bin";
 
 static void saveSleepFrameBuffer() {
   HalFile file;
@@ -262,9 +263,9 @@ void enterDeepSleep(bool fromTimeout = false) {
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
 
   const bool isQuickResumeSleep =
-      SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
+      SETTINGS.sleepScreen == BorgesSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
-       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
+       SETTINGS.quickResumeSleepScreen == BorgesSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
   // Every sleep mode leaves a complete retained frame on the e-ink panel. Keep
   // it visible until the first useful reader or home paint replaces it.
   APP_STATE.showBootScreen = false;
@@ -279,7 +280,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   // onExit() has now persisted the last page/session into the durable outbox.
   // Make one bounded best-effort exchange before powering the modem down; a
   // failure leaves the queue intact for the next reader/WiFi reconnect.
-  TOTO_SYNC_SCHEDULER.flushBeforeSleep();
+  BORGES_SYNC_SCHEDULER.flushBeforeSleep();
 
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
@@ -412,6 +413,12 @@ void setup() {
     return;
   }
 
+  if (!migrateBorgesStorage(Storage)) {
+    setupDisplayAndFonts(false);
+    activityManager.goToFullScreenMessage("Borges: storage migration failed. Restart to retry.", EpdFontFamily::BOLD);
+    return;
+  }
+
   HalSystem::checkPanic();
 
   APP_STATE.loadFromFile();
@@ -428,22 +435,22 @@ void setup() {
   // in-memory value only when the file carries no readerMenuStyle key, so a
   // user's saved choice (either style) still wins.
   if (gpio.hasTouch()) {
-    SETTINGS.readerMenuStyle = CrossPointSettings::READER_MENU_TOOLBAR;
+    SETTINGS.readerMenuStyle = BorgesSettings::READER_MENU_TOOLBAR;
   }
   SETTINGS.loadFromFile();
   RECENT_BOOKS.loadFromFile();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
-  TOTO_CREDENTIALS.loadFromFile();
+  BORGES_CREDENTIALS.loadFromFile();
   // Pairing owns the Borges integrations. Repair a missing/stale OPDS or
   // KOSync entry after an upgrade or credential rotation, but the bootstrap is
   // idempotent and does not write the SD when all fields already match.
-  if (TOTO_CREDENTIALS.paired() && !toto::bootstrapCrossPointServices()) {
-    LOG_ERR("TOTO", "Could not repair paired Borges services at boot");
+  if (BORGES_CREDENTIALS.paired() && !borges::bootstrapBorgesServices()) {
+    LOG_ERR("BORGES", "Could not repair paired Borges services at boot");
   }
-  TOTO_QUEUE.begin();
-  if (TOTO_QUEUE.depth() > 0) TOTO_SYNC_SCHEDULER.notifyLifecycleCommit();
+  BORGES_QUEUE.begin();
+  if (BORGES_QUEUE.depth() > 0) BORGES_SYNC_SCHEDULER.notifyLifecycleCommit();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
@@ -457,7 +464,7 @@ void setup() {
     case HalGPIO::WakeupReason::PowerButton:
       // With Short Power Button Press = Sleep, a single click wakes on any
       // device; otherwise the button must still be held (ghost-wake debounce).
-      if (!wakeHoldVerified && SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP) {
+      if (!wakeHoldVerified && SETTINGS.shortPwrBtn != BorgesSettings::SHORT_PWRBTN::SLEEP) {
         LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");
         Storage.prepareForDeepSleep();
         powerManager.startDeepSleep(gpio);
@@ -487,7 +494,7 @@ void setup() {
       break;
   }
 
-  LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
+  LOG_DBG("MAIN", "Starting Borges version " BORGES_VERSION);
 
   // Resolve the single boot-presentation decision. Skipping the splash also
   // skips the panel-clearing pass and the X3 initial-full-sync arming (see
@@ -598,7 +605,7 @@ void loop() {
   const unsigned long loopStartTime = millis();
   static unsigned long lastMemPrint = 0;
 
-  gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
+  gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == BorgesSettings::SHORT_PWRBTN::SLEEP);
   mappedInputManager.update();
 
   if (activityManager.requiresExclusiveStorageLoop()) {
@@ -694,7 +701,7 @@ void loop() {
   // A single X4 Pro power click becomes Confirm only after the frontlight
   // double-click window expires without a second click.
   mappedInputManager.setPowerConfirmClickFrame(false);
-  if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::PWR_CONFIRM && BoardConfig::isX4Pro() &&
+  if (SETTINGS.shortPwrBtn == BorgesSettings::SHORT_PWRBTN::PWR_CONFIRM && BoardConfig::isX4Pro() &&
       lastX4ProPowerClickAt != 0 && millis() - lastX4ProPowerClickAt > X4PRO_POWER_DOUBLE_CLICK_MS) {
     lastX4ProPowerClickAt = 0;
     mappedInputManager.setPowerConfirmClickFrame(true);
@@ -731,8 +738,8 @@ void loop() {
   // Paper Mono reports the PMIC power button as a one-tick click, so the held
   // path above cannot fire. With the default Ignore action, retain the normal
   // power-button meaning and shut down; explicit alternate bindings still win.
-  if ((SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP ||
-       SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::IGNORE) &&
+  if ((SETTINGS.shortPwrBtn == BorgesSettings::SHORT_PWRBTN::SLEEP ||
+       SETTINGS.shortPwrBtn == BorgesSettings::SHORT_PWRBTN::IGNORE) &&
       millis() >= allowSleepAt && mappedInputManager.wasReleased(MappedInputManager::Button::Power)) {
     enterDeepSleep();
     return;
@@ -740,7 +747,7 @@ void loop() {
 #endif
 
   // Refresh screen when power button is short-pressed with FORCE_REFRESH setting.
-  if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::FORCE_REFRESH &&
+  if (SETTINGS.shortPwrBtn == BorgesSettings::SHORT_PWRBTN::FORCE_REFRESH &&
       mappedInputManager.wasReleased(MappedInputManager::Button::Power)) {
     LOG_DBG("MAIN", "Manual screen refresh triggered");
     if (!activityManager.handleForcedRefresh()) {
@@ -761,7 +768,7 @@ void loop() {
 
   const unsigned long activityStartTime = millis();
   activityManager.loop();
-  TOTO_SYNC_SCHEDULER.tick(activityManager.isReaderActivity());
+  BORGES_SYNC_SCHEDULER.tick(activityManager.isReaderActivity());
   const unsigned long activityDuration = millis() - activityStartTime;
 
   const unsigned long loopDuration = millis() - loopStartTime;

@@ -1,6 +1,6 @@
-# CrossPoint Reader Roadmap
+# Borges Reader Roadmap
 
-This roadmap describes how CrossPoint is moving through the tighter scope defined in [SCOPE.md](SCOPE.md). It is
+This roadmap describes how Borges is moving through the tighter scope defined in [SCOPE.md](SCOPE.md). It is
 intentionally phased: Phase 0 closed out the commitments already in flight before locking down to the stricter
 "fill gaps the stock firmware leaves" delineator.
 
@@ -28,7 +28,7 @@ is not a valid argument for accepting a PR.
 ## Phase 1 - Consolidation, Footprint, and Multi-Device Support — **IN PROGRESS**
 
 **Goal:** Reduce memory and flash usage, clean up the codebase, and land the SDK / HAL generalization work so
-CrossPoint runs cleanly on ESP32-based e-reader hardware beyond Xteink (X3 / X4), including ESP32-S3 class devices.
+Borges runs cleanly on ESP32-based e-reader hardware beyond Xteink (X3 / X4), including ESP32-S3 class devices.
 
 **Focus areas:**
 
@@ -79,7 +79,7 @@ This phase depends on Phase 1 cleanup landing first; otherwise we generalize a m
 
 ## Out of Roadmap
 
-The following are explicitly *not* on the roadmap. They may live in other CrossPoint forks; they will not be picked
+The following are explicitly *not* on the roadmap. They may live in other Borges forks; they will not be picked
 up here:
 
 * Interactive apps (games, calculators, notepads).

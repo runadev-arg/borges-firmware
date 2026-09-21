@@ -5,7 +5,7 @@
 #include <functional>
 #include <memory>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "components/themes/BaseTheme.h"
 
 class UITheme {
@@ -30,7 +30,7 @@ class UITheme {
                                       EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                                       TextVerticalAlignment verticalAlignment = TextVerticalAlignment::CENTER);
   void reload();
-  void setTheme(CrossPointSettings::UI_THEME type);
+  void setTheme(BorgesSettings::UI_THEME type);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
   static UIIcon getFileIcon(const std::string& filename);
   static int getStatusBarHeight();

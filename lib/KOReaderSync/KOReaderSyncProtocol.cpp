@@ -43,11 +43,10 @@ KOReaderSyncResponse classifyKOReaderResponse(KOReaderSyncOperation operation, i
   if (httpCode == 401) return KOReaderSyncResponse::AUTH_FAILED;
   if (operation == KOReaderSyncOperation::CREATE_USER && httpCode == 402) return KOReaderSyncResponse::USER_EXISTS;
   if (operation == KOReaderSyncOperation::GET_PROGRESS &&
-      (httpCode == 404 || (httpCode == 200 && isEmptyKOReaderProgress(body)))) {
+      (httpCode == 404 || httpCode == 204 || (httpCode == 200 && isEmptyKOReaderProgress(body)))) {
     return KOReaderSyncResponse::NOT_FOUND;
   }
-  if (httpCode == 200 || (operation == KOReaderSyncOperation::PUT_PROGRESS && httpCode == 202) ||
-      (operation == KOReaderSyncOperation::CREATE_USER && httpCode == 201)) {
+  if (httpCode >= 200 && httpCode < 300) {
     return KOReaderSyncResponse::OK;
   }
   const int protocolCode = parseKOReaderProtocolCode(body);

@@ -13,7 +13,7 @@
 #include <string>
 #include <utility>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "fontIds.h"
 
 namespace textsettings {
@@ -22,7 +22,7 @@ namespace {
 
 // Map the paragraph-alignment setting to the engine's CssTextAlign (BOOK_STYLE = justified)
 CssTextAlign toCssAlign(uint8_t align) {
-  if (align == CrossPointSettings::BOOK_STYLE) return CssTextAlign::Justify;
+  if (align == BorgesSettings::BOOK_STYLE) return CssTextAlign::Justify;
   return static_cast<CssTextAlign>(align);
 }
 

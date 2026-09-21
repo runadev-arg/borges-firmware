@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "activities/Activity.h"
 #include "components/UiAppHost.h"
 #include "util/ButtonNavigator.h"
@@ -32,7 +32,7 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   // The touch tile toggles SETTINGS.touchReaderControls between off and this
   // remembered mode, so a Swipe or Inverted Tap user gets their mode back
   // rather than the Tap default. Seeded from the setting in onEnter().
-  uint8_t touchModeRestore = CrossPointSettings::TOUCH_READER_ON;
+  uint8_t touchModeRestore = BorgesSettings::TOUCH_READER_ON;
   int panelBottom = 0;
 
   // Quick-setting tiles, in grid order (2 columns): night mode, refresh,

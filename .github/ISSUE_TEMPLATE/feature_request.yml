@@ -1,16 +1,16 @@
 name: Feature Request
-description: Propose a new feature, enhancement, or change to CrossPoint
+description: Propose a new feature, enhancement, or change to Borges
 title: "Short, descriptive title of the request"
 labels: ["enhancement", "needs-scope-review"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to propose a change to CrossPoint!
+        Thanks for taking the time to propose a change to Borges!
 
         **Before you continue, please read [SCOPE.md](../blob/master/SCOPE.md) and [ROADMAP.md](../blob/master/ROADMAP.md).**
 
-        CrossPoint is intentionally narrow. Most rejected proposals are rejected for scope reasons that are already
+        Borges is intentionally narrow. Most rejected proposals are rejected for scope reasons that are already
         documented. The checklist below exists to save both of us time.
 
         If you are not sure whether your idea fits, open a [Discussion](../../discussions) first instead of filing
@@ -32,7 +32,7 @@ body:
           required: true
         - label: The stock firmware does **not** already handle this well.
           required: true
-        - label: No other popular CrossPoint fork already handles this well (or, if one does, I explain below why CrossPoint still needs it).
+        - label: No other popular Borges fork already handles this well (or, if one does, I explain below why Borges still needs it).
           required: true
 
   - type: textarea
@@ -65,7 +65,7 @@ body:
     attributes:
       label: Memory / flash / complexity cost
       description: |
-        CrossPoint runs on 380KB of RAM. Roughly how much DRAM, flash, or code complexity does this add?
+        Borges runs on 380KB of RAM. Roughly how much DRAM, flash, or code complexity does this add?
         "Don't know" is a valid answer, but please attempt an estimate.
       placeholder: e.g., "Adds ~2KB flash for the new font tables, no DRAM impact at runtime."
     validations:

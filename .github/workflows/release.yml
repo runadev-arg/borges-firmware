@@ -8,7 +8,7 @@ name: Compile Release
 on:
   push:
     tags:
-      - '*'
+      - 'v*-borges.*'
 
 permissions:
   contents: read
@@ -20,14 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pio_env: gh_release
-            asset: firmware.bin
-          - pio_env: sticky-gh_release
-            asset: firmware-sticky.bin
-          - pio_env: x4pro-gh_release
-            asset: firmware-x4pro.bin
-          - pio_env: papermono-gh_release
-            asset: firmware-papermono.bin
+          - pio_env: borges_release
+            asset: borges-x4.bin
     steps:
       - uses: actions/checkout@v6
         with:
@@ -61,7 +55,7 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
-      - name: Build CrossPoint
+      - name: Build Borges
         run: pio run -e ${{ matrix.pio_env }} -j1
 
       - name: Name release asset

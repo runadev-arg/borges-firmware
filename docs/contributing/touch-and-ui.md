@@ -1,6 +1,6 @@
 # Touch and UI Development
 
-CrossPoint runs on touch devices (Seeed Sticky, M5Paper, M5Stack PaperMono, LilyGo T5, Xteink X4 Pro) alongside the button-only Xteink X3/X4. Every screen must work with both input styles.
+Borges runs on touch devices (Seeed Sticky, M5Paper, M5Stack PaperMono, LilyGo T5, Xteink X4 Pro) alongside the button-only Xteink X3/X4. Every screen must work with both input styles.
 
 **There is one supported way to build a new screen: FreeInkUI, hosted through the firmware base classes below.** Touch hit-testing, tap highlighting, long-press, swipe scrolling, and button focus navigation all come from the shared stack; you never hand-roll coordinate math.
 
@@ -160,11 +160,11 @@ build_flags =
   -DFREEINK_DEVICE_M5PAPER=1
   ; the 63KB 540x960 framebuffer lives in PSRAM (FREEINK_FB_PSRAM auto-on)
   -DBOARD_HAS_PSRAM
-  -DCROSSPOINT_VERSION=\"${crosspoint.version}-m5paper\"
+  -DBORGES_VERSION=\"${crosspoint.version}-m5paper\"
   -DENABLE_SERIAL_LOG
   -DLOG_LEVEL=2
   ; touch-first device: hide front-button hint labels
-  -DCROSSPOINT_SHOW_BUTTON_HINTS=0
+  -DBORGES_SHOW_BUTTON_HINTS=0
   ; archive-scan-order workaround: without these a full relink drops Wire's i2c symbols
   -Wl,-u,i2cInit
   -Wl,-u,i2cSlaveInit
@@ -182,10 +182,10 @@ build_flags =
   -DFREEINK_DEVICE_LILYGO=1
   ; board injects the parallel-bus pins + PMIC power hooks (BoardT5S3)
   -DFREEINK_LGFX_EPD_CONFIG=lilygoT5S3LgfxConfig
-  -DCROSSPOINT_VERSION=\"${crosspoint.version}-lilygo\"
+  -DBORGES_VERSION=\"${crosspoint.version}-lilygo\"
   -DENABLE_SERIAL_LOG
   -DLOG_LEVEL=2
-  -DCROSSPOINT_SHOW_BUTTON_HINTS=0
+  -DBORGES_SHOW_BUTTON_HINTS=0
 lib_deps =
   ${base.lib_deps}
   ; LgfxEpdConfig for the T5 S3 (pins, PCA9535/TPS65185 power sequence)

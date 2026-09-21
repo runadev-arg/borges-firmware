@@ -16,7 +16,7 @@ If your device isn't USB-locked, flash it over USB instead — it's safer and mu
 - A SPI flash programmer. On this guide we use a CH341a; A Bus Pirate, Raspberry Pi/Pico or suitable Arduino, also works.
 - Programmer software. flashrom (with libftdi) work on all OSs.
 - esptool.py, but only if you intend to dump firmware from another device to use as your source image.
-  
+
 ## Before You Start
 
 - Lithium batteries are dangerous, do not short or puncture. Be careful.
@@ -78,7 +78,7 @@ Connect the test clip to the flash chip before connecting the programmer to USB.
 - Confirm each lead is making contact with a chip pin and not the epoxy body.
 - If the programmer has a voltage selector, set it to 3.3V.
 - Verify no other power source is connected — use a multimeter if there's any doubt.
-  
+
 ![chip](./images/spiflash/spi_flash_chip.jpg)
 ![connect](./images/spiflash/connect_clip_to_spiflash_chip.jpg)
 
@@ -128,4 +128,3 @@ Read the chip twice and compare hashes. If they don't match, something in the cl
 ![success 1](./images/spiflash/success_1.jpg)
 
 If CrossPoint boots successfully, the device can be fully reassembled.
-

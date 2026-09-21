@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <iterator>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
@@ -69,7 +69,7 @@ void FrontlightPanelActivity::onEnter() {
 
   // Seed the touch tile's restore mode from the live setting, so toggling off
   // and back on within this session returns to the mode the user had.
-  if (SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF) {
+  if (SETTINGS.touchReaderControls != BorgesSettings::TOUCH_READER_OFF) {
     touchModeRestore = SETTINGS.touchReaderControls;
   }
 
@@ -170,9 +170,9 @@ void FrontlightPanelActivity::runTile(const int idx) {
       // panel's own gestures (including the swipe that reopens it) keep
       // working while it is off. Off remembers the mode (Tap/Swipe/Inverted
       // Tap) so toggling back does not stomp the user's choice.
-      if (SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF) {
+      if (SETTINGS.touchReaderControls != BorgesSettings::TOUCH_READER_OFF) {
         touchModeRestore = SETTINGS.touchReaderControls;
-        SETTINGS.touchReaderControls = CrossPointSettings::TOUCH_READER_OFF;
+        SETTINGS.touchReaderControls = BorgesSettings::TOUCH_READER_OFF;
       } else {
         SETTINGS.touchReaderControls = touchModeRestore;
       }
@@ -382,7 +382,7 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
     const char* orientLabel = I18N.get(kOrientNames[SETTINGS.orientation % 4]);
     // "Touch On" / "Touch Off", from the existing state strings: the label
     // names the current state of the touch-reader-controls setting.
-    const bool touchOn = SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF;
+    const bool touchOn = SETTINGS.touchReaderControls != BorgesSettings::TOUCH_READER_OFF;
     char touchLabel[48];
     snprintf(touchLabel, sizeof(touchLabel), "%s %s", tr(STR_TOUCH_TOGGLE),
              I18N.get(touchOn ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF));

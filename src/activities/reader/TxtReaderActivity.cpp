@@ -9,7 +9,7 @@
 #include <Serialization.h>
 #include <Utf8.h>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "ProgressFile.h"
 #include "ReaderActivity.h"
 #include "ReaderUtils.h"
@@ -24,7 +24,7 @@ constexpr uint8_t CACHE_VERSION = 3;          // Increment when cache format cha
 }  // namespace
 
 bool TxtReaderActivity::loadBook() {
-  txt = makeUniqueNoThrow<Txt>(bookPath, "/.crosspoint");
+  txt = makeUniqueNoThrow<Txt>(bookPath, "/.borges");
   if (!txt) {
     LOG_ERR("TRS", "Failed to allocate TXT object");
     return false;
@@ -282,26 +282,26 @@ void TxtReaderActivity::renderPage(GfxRenderer& renderer) {
         int x = cachedOrientedMarginLeft;
         const bool lineIsRtl = BidiUtils::startsWithRtl(line.c_str(), BidiUtils::RTL_PARAGRAPH_PROBE_DEPTH);
         uint8_t effectiveAlignment = cachedParagraphAlignment;
-        if (lineIsRtl && (effectiveAlignment == CrossPointSettings::LEFT_ALIGN ||
-                          effectiveAlignment == CrossPointSettings::JUSTIFIED)) {
-          effectiveAlignment = CrossPointSettings::RIGHT_ALIGN;
+        if (lineIsRtl && (effectiveAlignment == BorgesSettings::LEFT_ALIGN ||
+                          effectiveAlignment == BorgesSettings::JUSTIFIED)) {
+          effectiveAlignment = BorgesSettings::RIGHT_ALIGN;
         }
         const int textWidth = renderer.getTextAdvanceX(cachedFontId, line.c_str(), EpdFontFamily::REGULAR);
 
         // Apply text alignment
         switch (effectiveAlignment) {
-          case CrossPointSettings::LEFT_ALIGN:
+          case BorgesSettings::LEFT_ALIGN:
           default:
             break;
-          case CrossPointSettings::CENTER_ALIGN: {
+          case BorgesSettings::CENTER_ALIGN: {
             x = cachedOrientedMarginLeft + (contentWidth - textWidth) / 2;
             break;
           }
-          case CrossPointSettings::RIGHT_ALIGN: {
+          case BorgesSettings::RIGHT_ALIGN: {
             x = cachedOrientedMarginLeft + contentWidth - textWidth;
             break;
           }
-          case CrossPointSettings::JUSTIFIED:
+          case BorgesSettings::JUSTIFIED:
             break;
         }
 

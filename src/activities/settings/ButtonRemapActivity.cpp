@@ -3,7 +3,7 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 
@@ -51,10 +51,10 @@ void ButtonRemapActivity::loop() {
   // - Down: cancel without saving.
   if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
     // Persist default mapping immediately so the user can recover quickly.
-    SETTINGS.frontButtonBack = CrossPointSettings::FRONT_HW_BACK;
-    SETTINGS.frontButtonConfirm = CrossPointSettings::FRONT_HW_CONFIRM;
-    SETTINGS.frontButtonLeft = CrossPointSettings::FRONT_HW_LEFT;
-    SETTINGS.frontButtonRight = CrossPointSettings::FRONT_HW_RIGHT;
+    SETTINGS.frontButtonBack = BorgesSettings::FRONT_HW_BACK;
+    SETTINGS.frontButtonConfirm = BorgesSettings::FRONT_HW_CONFIRM;
+    SETTINGS.frontButtonLeft = BorgesSettings::FRONT_HW_LEFT;
+    SETTINGS.frontButtonRight = BorgesSettings::FRONT_HW_RIGHT;
     SETTINGS.saveToFile();
     finish();
     return;
@@ -138,10 +138,10 @@ void ButtonRemapActivity::render(RenderLock&&) {
 
   // Live preview of logical labels under front buttons.
   // This mirrors the on-device front button order: Back, Confirm, Left, Right.
-  GUI.drawButtonHints(renderer, labelForHardware(CrossPointSettings::FRONT_HW_BACK),
-                      labelForHardware(CrossPointSettings::FRONT_HW_CONFIRM),
-                      labelForHardware(CrossPointSettings::FRONT_HW_LEFT),
-                      labelForHardware(CrossPointSettings::FRONT_HW_RIGHT));
+  GUI.drawButtonHints(renderer, labelForHardware(BorgesSettings::FRONT_HW_BACK),
+                      labelForHardware(BorgesSettings::FRONT_HW_CONFIRM),
+                      labelForHardware(BorgesSettings::FRONT_HW_LEFT),
+                      labelForHardware(BorgesSettings::FRONT_HW_RIGHT));
   renderer.displayBuffer();
 }
 
@@ -216,13 +216,13 @@ const char* ButtonRemapActivity::getRoleName(const uint8_t roleIndex) const {
 
 const char* ButtonRemapActivity::getHardwareName(const uint8_t buttonIndex) const {
   switch (buttonIndex) {
-    case CrossPointSettings::FRONT_HW_BACK:
+    case BorgesSettings::FRONT_HW_BACK:
       return tr(STR_HW_BACK_LABEL);
-    case CrossPointSettings::FRONT_HW_CONFIRM:
+    case BorgesSettings::FRONT_HW_CONFIRM:
       return tr(STR_HW_CONFIRM_LABEL);
-    case CrossPointSettings::FRONT_HW_LEFT:
+    case BorgesSettings::FRONT_HW_LEFT:
       return tr(STR_HW_LEFT_LABEL);
-    case CrossPointSettings::FRONT_HW_RIGHT:
+    case BorgesSettings::FRONT_HW_RIGHT:
       return tr(STR_HW_RIGHT_LABEL);
     default:
       return "Unknown";

@@ -1,6 +1,6 @@
 #include "KeyboardLayoutSet.h"
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 
 namespace keyboard_layouts {
 

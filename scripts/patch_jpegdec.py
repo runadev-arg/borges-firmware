@@ -1,5 +1,5 @@
 """
-PlatformIO pre-build script: apply CrossPoint's JPEGDEC patches via `git apply`.
+PlatformIO pre-build script: apply Borges's JPEGDEC patches via `git apply`.
 
 The upstream JPEGDEC pin still has the wild-pointer + DC-write bugs in
 JPEGDecodeMCU_P that surface when EIGHT_BIT_GRAYSCALE decodes a 3-component
@@ -30,7 +30,7 @@ def patch_jpegdec(env):
     if not os.path.isdir(libdeps_dir):
         return
     patches = _patch_files()
-    for env_dir in os.listdir(libdeps_dir):
+    for env_dir in (env["PIOENV"],):
         jpeg_dir = os.path.join(libdeps_dir, env_dir, "JPEGDEC")
         if not os.path.isdir(os.path.join(jpeg_dir, ".git")):
             continue

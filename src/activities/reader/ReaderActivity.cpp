@@ -7,8 +7,8 @@
 
 #include <algorithm>
 
-#include "CrossPointSettings.h"
-#include "CrossPointState.h"
+#include "BorgesSettings.h"
+#include "BorgesState.h"
 #include "EpubReaderActivity.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"

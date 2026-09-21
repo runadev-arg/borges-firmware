@@ -1,4 +1,4 @@
-/* CrossPoint only needs miniz's low-level streaming inflate (tinfl). The
+/* Borges only needs miniz's low-level streaming inflate (tinfl). The
  * archive, deflate, stdio, and zlib-compatibility layers are compiled out so
  * the vendored library stays small and never touches the filesystem or clock.
  * Include this header instead of <miniz.h> so every translation unit sees the

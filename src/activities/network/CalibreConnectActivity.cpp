@@ -14,7 +14,7 @@
 #include "util/TaskWatchdog.h"
 
 namespace {
-constexpr const char* HOSTNAME = "crosspoint";
+constexpr const char* HOSTNAME = "borges";
 }  // namespace
 
 void CalibreConnectActivity::onEnter() {
@@ -84,14 +84,14 @@ void CalibreConnectActivity::startWebServer() {
   // Heap-critical allocation: SD-font caches retained for the CJK UI fallback
   // are rebuildable — release them (again: the WiFi selection screen may have
   // repopulated them rendering a CJK SSID) so the server object doesn't abort
-  // on OOM. See CrossPointWebServerActivity::startWebServer().
+  // on OOM. See BorgesWebServerActivity::startWebServer().
   if (auto* fcm = renderer.getFontCacheManager()) {
     LOG_DBG("CAL", "Free heap before SD font cache release: %d bytes", ESP.getFreeHeap());
     fcm->releaseSdFontCaches();
     LOG_DBG("CAL", "Free heap before server alloc: %d bytes", ESP.getFreeHeap());
   }
 
-  webServer.reset(new CrossPointWebServer());
+  webServer.reset(new BorgesWebServer());
   webServer->begin();
 
   if (webServer->isRunning()) {

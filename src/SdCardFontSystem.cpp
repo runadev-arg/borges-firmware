@@ -5,7 +5,7 @@
 
 #include <iterator>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "ReaderFontSizes.h"
 #include "fontIds.h"
 
@@ -40,7 +40,7 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
   registry_.discover();
 
   // Register this system as the SD font ID resolver in settings.
-  // Uses a static trampoline since CrossPointSettings stores a plain function pointer.
+  // Uses a static trampoline since BorgesSettings stores a plain function pointer.
   SETTINGS.sdFontIdResolver = [](void* ctx, const char* familyName, uint8_t pointSize) -> int {
     return static_cast<SdCardFontSystem*>(ctx)->resolveFontId(familyName, pointSize);
   };

@@ -40,7 +40,7 @@ class KOReaderCredentialStore : public PersistableStore<KOReaderCredentialStore>
   friend class PersistableStore<KOReaderCredentialStore>;
 
  public:
-  static const char* getFilePath() { return "/.crosspoint/koreader.json"; }
+  static const char* getFilePath() { return "/.borges/koreader.json"; }
   void toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 
@@ -65,8 +65,8 @@ class KOReaderCredentialStore : public PersistableStore<KOReaderCredentialStore>
   // Get base URL for API calls (with http:// normalization if no protocol, falls back to default)
   std::string getBaseUrl() const;
 
-  // Whether API calls target the CrossPoint sync server that supports protocol extensions.
-  bool usesCrossPointSyncServer() const;
+  // Whether API calls target the Borges sync server that supports protocol extensions.
+  bool usesBorgesSyncServer() const;
 
   // Document matching method
   void setMatchMethod(DocumentMatchMethod method);

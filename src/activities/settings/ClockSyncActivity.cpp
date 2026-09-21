@@ -8,7 +8,7 @@
 
 #include <cstdio>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"

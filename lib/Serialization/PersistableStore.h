@@ -28,7 +28,7 @@ class PersistableStoreBase {
   //
   // It is deliberately held across the SD write. That is safe only because the
   // read path does NOT take it — derived stores build their snapshots (e.g.
-  // CrossPointSettings::statusBarSpec) unlocked. If you ever lock this mutex on
+  // BorgesSettings::statusBarSpec) unlocked. If you ever lock this mutex on
   // a read path, you put it on the render path and stall rendering behind SD
   // I/O, and you create a storeMutex/storageMutex ordering hazard. Don't.
   mutable std::mutex storeMutex;
@@ -46,7 +46,7 @@ class PersistableStoreBase {
   // instead of instantiating serializeJson/deserializeJson in their own TU —
   // that per-TU duplication is exactly what this class exists to prevent.
 
-  // Serializes doc and writes it to path (ensures /.crosspoint exists). Logs on failure.
+  // Serializes doc and writes it to path (ensures /.borges exists). Logs on failure.
   static bool writeDocToFile(const char* path, const JsonDocument& doc);
 
   // Reads path and parses it into doc. Returns false silently when the file

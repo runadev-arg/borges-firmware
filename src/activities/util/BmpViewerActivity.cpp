@@ -10,7 +10,7 @@
 
 #include <algorithm>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -67,7 +67,7 @@ void BmpViewerActivity::loadSiblingImages() {
 
 bool BmpViewerActivity::canSetSleepCover() const {
   return FsHelpers::hasBmpExtension(filePath) ||
-         (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT_CUSTOM &&
+         (SETTINGS.sleepScreen == BorgesSettings::SLEEP_SCREEN_MODE::TRANSPARENT_CUSTOM &&
           FsHelpers::hasPngExtension(filePath));
 }
 
@@ -194,7 +194,7 @@ void BmpViewerActivity::onExit() {
 void BmpViewerActivity::doSetSleepCover() {
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
 
-  const bool transparentMode = SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT_CUSTOM;
+  const bool transparentMode = SETTINGS.sleepScreen == BorgesSettings::SLEEP_SCREEN_MODE::TRANSPARENT_CUSTOM;
   if (!canSetSleepCover()) return;
 
   const char* destination =
@@ -224,7 +224,7 @@ void BmpViewerActivity::doSetSleepCover() {
   }
 
   if (success) {
-    if (!transparentMode) SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
+    if (!transparentMode) SETTINGS.sleepScreen = BorgesSettings::SLEEP_SCREEN_MODE::CUSTOM;
     SETTINGS.saveToFile();
     GUI.drawPopup(renderer, tr(STR_DONE));
   } else {

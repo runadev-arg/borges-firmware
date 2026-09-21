@@ -1,14 +1,14 @@
-/* bidiclasses.t — bidi class table for CrossPoint RTL (Hebrew/Arabic) epub.
+/* bidiclasses.t — bidi class table for Borges RTL (Hebrew/Arabic) epub.
  *
  * Coverage rationale:
  *   Hebrew and Arabic-script languages (Arabic, Farsi, Urdu, Sindhi, Pashto,
- *   Kurdish) are the RTL targets. CrossPoint also renders Latin and Cyrillic
+ *   Kurdish) are the RTL targets. Borges also renders Latin and Cyrillic
  *   scripts for many other languages, so these MUST be classified as L (not
  *   fall through to ON) to avoid regression when they appear adjacent to
  *   RTL runs.
  *
  *   Scripts NOT in this table fall through to ON — correct per UAX#9 for
- *   scripts CrossPoint's fonts don't support (CJK, Devanagari, etc.)
+ *   scripts Borges's fonts don't support (CJK, Devanagari, etc.)
  *   ON is the right class for "unknown" — it behaves neutrally.
  *
  *   Arabic ranges are sourced from Unicode UCD extracted/DerivedBidiClass.txt
@@ -67,7 +67,7 @@
 {0x0300, 0x036F, NSM},
 
 /* ── Cyrillic (L) ────────────────────────────────────────────────────── */
-/* Required: CrossPoint supports Russian, Ukrainian, Bulgarian, etc.
+/* Required: Borges supports Russian, Ukrainian, Bulgarian, etc.
    Without these, Cyrillic chars fall to ON, breaking mixed Hebrew+Russian. */
 {0x0400, 0x04FF, L},    /* Cyrillic */
 {0x0500, 0x052F, L},    /* Cyrillic Supplement */
@@ -120,7 +120,7 @@
 
 /* ── Latin Extended Additional (L) ─────────────────────────────────── */
 /* Covers accented chars for Vietnamese, Welsh, Romanian, etc.
-   Not currently rendered by CrossPoint fonts, but costs only 2 table rows. */
+   Not currently rendered by Borges fonts, but costs only 2 table rows. */
 {0x1E00, 0x1EFF, L},
 
 /* ── Unicode directional format characters ─────────────────────────── */

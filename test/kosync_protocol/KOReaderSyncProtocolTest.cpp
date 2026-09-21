@@ -29,3 +29,14 @@ TEST(KOReaderSyncProtocol, PreservesActionableAuthAndPayloadFailures) {
             KOReaderSyncResponse::SERVER_ERROR);
   EXPECT_EQ(parseKOReaderProtocolCode(R"({"code": 2003, "message":"Invalid request"})"), 2003);
 }
+
+TEST(KOReaderSyncProtocol, AcceptsUpstreamSuccessVariantsAndMissingProgress) {
+  EXPECT_EQ(classifyKOReaderResponse(KOReaderSyncOperation::GET_PROGRESS, 204, ""), KOReaderSyncResponse::NOT_FOUND);
+  for (const auto operation :
+       {KOReaderSyncOperation::PUT_PROGRESS, KOReaderSyncOperation::AUTHENTICATE, KOReaderSyncOperation::CREATE_USER}) {
+    for (const int status : {200, 201, 202, 204}) {
+      EXPECT_EQ(classifyKOReaderResponse(operation, status, ""), KOReaderSyncResponse::OK);
+    }
+    EXPECT_NE(classifyKOReaderResponse(operation, 302, ""), KOReaderSyncResponse::OK);
+  }
+}

@@ -26,13 +26,13 @@ bool BookmarkFile::load(const std::string& bookPath, std::vector<BookmarkEntry>&
     bookmark.xpath = obj["xpath"] | "";
     bookmark.percentage = obj["percentage"] | static_cast<float>(0);
     bookmark.summary = obj["summary"] | "";
-    bookmark.totoSyncId = obj["toto_id"] | "";
-    bookmark.totoNote = obj["toto_note"] | "";
-    bookmark.totoFingerprint = obj["toto_fp"] | "";
-    bookmark.totoPendingEventId = obj["toto_event"] | "";
-    bookmark.totoRevision = obj["toto_rev"] | static_cast<uint64_t>(0);
-    bookmark.totoPendingSequence = obj["toto_seq"] | static_cast<uint64_t>(0);
-    bookmark.totoConflict = obj["toto_conflict"] | false;
+    bookmark.borgesSyncId = (obj["borges_id"].isNull() ? obj["borges_id"] : obj["borges_id"]) | "";
+    bookmark.borgesNote = (obj["borges_note"].isNull() ? obj["borges_note"] : obj["borges_note"]) | "";
+    bookmark.borgesFingerprint = (obj["borges_fp"].isNull() ? obj["borges_fp"] : obj["borges_fp"]) | "";
+    bookmark.borgesPendingEventId = (obj["borges_event"].isNull() ? obj["borges_event"] : obj["borges_event"]) | "";
+    bookmark.borgesRevision = (obj["borges_rev"].isNull() ? obj["borges_rev"] : obj["borges_rev"]) | static_cast<uint64_t>(0);
+    bookmark.borgesPendingSequence = (obj["borges_seq"].isNull() ? obj["borges_seq"] : obj["borges_seq"]) | static_cast<uint64_t>(0);
+    bookmark.borgesConflict = (obj["borges_conflict"].isNull() ? obj["borges_conflict"] : obj["borges_conflict"]) | false;
     bookmark.computedSpineIndex = obj["si"] | static_cast<uint16_t>(0);
     bookmark.computedChapterPageCount = obj["pc"] | static_cast<uint16_t>(0);
     bookmark.computedChapterProgress = obj["pp"] | static_cast<uint16_t>(0);
@@ -55,13 +55,13 @@ bool BookmarkFile::save(const std::string& bookPath, const std::vector<BookmarkE
     obj["xpath"] = bookmark.xpath;
     obj["percentage"] = bookmark.percentage;
     obj["summary"] = bookmark.summary;
-    if (!bookmark.totoSyncId.empty()) obj["toto_id"] = bookmark.totoSyncId;
-    if (!bookmark.totoNote.empty()) obj["toto_note"] = bookmark.totoNote;
-    if (!bookmark.totoFingerprint.empty()) obj["toto_fp"] = bookmark.totoFingerprint;
-    if (!bookmark.totoPendingEventId.empty()) obj["toto_event"] = bookmark.totoPendingEventId;
-    if (bookmark.totoRevision > 0) obj["toto_rev"] = bookmark.totoRevision;
-    if (bookmark.totoPendingSequence > 0) obj["toto_seq"] = bookmark.totoPendingSequence;
-    if (bookmark.totoConflict) obj["toto_conflict"] = true;
+    if (!bookmark.borgesSyncId.empty()) obj["borges_id"] = bookmark.borgesSyncId;
+    if (!bookmark.borgesNote.empty()) obj["borges_note"] = bookmark.borgesNote;
+    if (!bookmark.borgesFingerprint.empty()) obj["borges_fp"] = bookmark.borgesFingerprint;
+    if (!bookmark.borgesPendingEventId.empty()) obj["borges_event"] = bookmark.borgesPendingEventId;
+    if (bookmark.borgesRevision > 0) obj["borges_rev"] = bookmark.borgesRevision;
+    if (bookmark.borgesPendingSequence > 0) obj["borges_seq"] = bookmark.borgesPendingSequence;
+    if (bookmark.borgesConflict) obj["borges_conflict"] = true;
     obj["si"] = bookmark.computedSpineIndex;
     obj["pc"] = bookmark.computedChapterPageCount;
     obj["pp"] = bookmark.computedChapterProgress;
@@ -70,7 +70,7 @@ bool BookmarkFile::save(const std::string& bookPath, const std::vector<BookmarkE
     }
   }
 
-  // writeDocToFile ensures /.crosspoint; the bookmarks subdirectory is ours.
+  // writeDocToFile ensures /.borges; the bookmarks subdirectory is ours.
   Storage.mkdir(BookmarkUtil::getBookmarksDir().c_str());
   const std::string path = BookmarkUtil::getBookmarkPath(bookPath);
   return PersistableStoreBase::writeDocToFile(path.c_str(), doc);

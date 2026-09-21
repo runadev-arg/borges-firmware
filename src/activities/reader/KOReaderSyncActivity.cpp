@@ -66,7 +66,7 @@ KOReaderSyncActivity::KOReaderSyncActivity(GfxRenderer& renderer, MappedInputMan
 void KOReaderSyncActivity::ensureEpubLoaded() {
   if (!epub) {
     LOG_DBG("KOSync", "Loading epub for progress mapping (heap: %u)", (unsigned)ESP.getFreeHeap());
-    epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+    epub = std::make_shared<Epub>(epubPath, "/.borges");
     epub->setupCacheDir();
     // Load metadata only (no CSS needed for progress mapping, don't rebuild if cache is missing).
     if (!epub->load(false, true)) {
@@ -137,7 +137,7 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   }
   requestUpdate(true);
 
-  // KOSync requests from CrossPoint do not include a client timestamp.
+  // KOSync requests from Borges do not include a client timestamp.
   performSync();
 }
 
@@ -232,11 +232,11 @@ void KOReaderSyncActivity::performSync() {
   }
 
   // The standard KOReader progress XPath is the authoritative content anchor.
-  // The CrossPoint server's existing rich page hints remain a legacy fallback.
+  // The Borges server's existing rich page hints remain a legacy fallback.
   SavedProgressPosition koPos = {remoteProgress.progress, remoteProgress.percentage};
-  remotePosition = ProgressMapper::toCrossPoint(epub, koPos, renderer, currentSpineIndex, totalPagesInSpine);
+  remotePosition = ProgressMapper::toBorges(epub, koPos, renderer, currentSpineIndex, totalPagesInSpine);
   if (!remotePosition.hasVisibleTextOffset && remoteProgress.position.has_value()) {
-    // toCrossPoint above already tried koPos.xpath; if the rich position carries the same XPath,
+    // toBorges above already tried koPos.xpath; if the rich position carries the same XPath,
     // tell fromRichPosition to skip re-resolving it and use its page hints directly.
     const bool sameXPath = remoteProgress.position->xpath == remoteProgress.progress;
     if (const auto richMapped = ProgressMapper::fromRichPosition(epub, *remoteProgress.position, renderer, sameXPath)) {
@@ -283,10 +283,10 @@ void KOReaderSyncActivity::performUpload() {
   progress.progress = localProgress.xpath;
   progress.percentage = localProgress.percentage;
 
-  // Rich CrossPoint position for the default CrossPoint sync server (lossless
-  // CrossPoint<->CrossPoint sync). The HTTP client also enforces this boundary
+  // Rich Borges position for the default Borges sync server (lossless
+  // Borges<->Borges sync). The HTTP client also enforces this boundary
   // before serializing the extension.
-  if (KOREADER_STORE.usesCrossPointSyncServer()) {
+  if (KOREADER_STORE.usesBorgesSyncServer()) {
     KOReaderRichPosition pos;
     const float pct = localProgress.percentage < 0.0f   ? 0.0f
                       : localProgress.percentage > 1.0f ? 1.0f

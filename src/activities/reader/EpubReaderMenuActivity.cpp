@@ -4,7 +4,7 @@
 #include <HalFrontlight.h>
 #include <I18n.h>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
 #include "components/UITheme.h"
@@ -40,9 +40,9 @@ void EpubReaderMenuActivity::buildMenuRowItems() {
 void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool hasFootnotes, bool hasBookmarks) {
   items.clear();
   items.reserve(MAX_MENU_ITEMS);
-  items.push_back({MenuAction::SYNC, StrId::STR_TOTO_SYNC_NOW});
-  items.push_back({MenuAction::FETCH_LATEST, StrId::STR_TOTO_BOOK_FETCH_LATEST});
-  items.push_back({MenuAction::FETCH_OTHER, StrId::STR_TOTO_BOOK_FETCH_OTHER});
+  items.push_back({MenuAction::SYNC, StrId::STR_BORGES_SYNC_NOW});
+  items.push_back({MenuAction::FETCH_LATEST, StrId::STR_BORGES_BOOK_FETCH_LATEST});
+  items.push_back({MenuAction::FETCH_OTHER, StrId::STR_BORGES_BOOK_FETCH_OTHER});
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});

@@ -78,23 +78,23 @@ Never invoke or probe `clang-format` directly. The repository wrapper is the onl
 **PlatformIO is BOTH a VS Code extension AND a CLI tool**:
 
 1. **VS Code Extension** (Recommended):
-   
+
    * Extension ID: `platformio.platformio-ide` (see `.vscode/extensions.json`)
-   
+
    * Provides: Toolbar buttons, IntelliSense, integrated build/upload/monitor
-   
+
    * Configuration: `.vscode/c_cpp_properties.json`, `.vscode/tasks.json`
-   
+
    * Usage: Click Build (✓), Upload (→), or Monitor (🔌) buttons
 
 2. **CLI Tool** (`pio` command):
-   
+
    * **Installation**: Python package (typically `pip install platformio`)
-   
+
    * **Windows Location**: `C:\Users\<user>\AppData\Local\Programs\Python\Python3xx\Scripts\pio.exe`
-   
+
    * **Verify**: `which pio` (Git Bash) or `where.exe pio` (cmd)
-   
+
    * **Usage**: `pio run`, `pio run -t upload`, etc.
 
 **Configuration Files**:
@@ -133,11 +133,11 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
 - SdFat's `FsBaseFile` destructor calls `close()` automatically when the object goes out of scope
 - **Do NOT add explicit `file.close()` calls** for local `FsFile` variables — the destructor handles it
 - Explicit `close()` is still required in these cases:
-  
+
   1. **Close before delete**: Must close before `Storage.remove()` on the same path
-  
+
   2. **Close before reopen**: Must close before reopening the same `FsFile` variable (e.g., write then reopen for read, or rewrite the same path)
-  
+
   3. **Member variables**: `FsFile` members persist beyond any single function scope, so close at the intended release point (e.g., in `onExit()`)
 
 **SINGLE_BUFFER_MODE implications**:
@@ -219,7 +219,7 @@ if (Storage.openFileForRead("MODULE", "/path/to/file.bin", file)) {
 
 ### Memory Safety and RAII
 
-* Smart Pointers: Prefer std::unique_ptr. 
+* Smart Pointers: Prefer std::unique_ptr.
 * RAII: Use destructors for cleanup. Call `vTaskDelete()` explicitly for deterministic task release. Do NOT call `file.close()` on local `FsFile` variables — `DESTRUCTOR_CLOSES_FILE=1` handles it at scope exit (see Critical Build Flags).
 
 ### ESP32-C3 Platform Pitfalls
@@ -417,25 +417,25 @@ Constraint: Physical button positions are fixed on hardware, but their logical f
 **Button Categories**:
 
 1. **Physical Fixed** (Up/Down side buttons):
-   
+
    - `Button::Up` → Always `HalGPIO::BTN_UP`
-   
+
    - `Button::Down` → Always `HalGPIO::BTN_DOWN`
 
 2. **User Remappable** (Front buttons):
-   
+
    - `Button::Back` → Maps to `SETTINGS.frontButtonBack` (hardware index)
-   
+
    - `Button::Confirm` → Maps to `SETTINGS.frontButtonConfirm`
-   
+
    - `Button::Left` → Maps to `SETTINGS.frontButtonLeft`
-   
+
    - `Button::Right` → Maps to `SETTINGS.frontButtonRight`
 
 3. **Reader-Specific** (Page navigation with optional swap):
-   
+
    - `Button::PageBack` → Uses side button (swappable via `SETTINGS.sideButtonLayout`)
-   
+
    - `Button::PageForward` → Uses side button (swappable)
 
 **Implementation**:
@@ -449,7 +449,7 @@ Constraint: Physical button positions are fixed on hardware, but their logical f
 
 ### UITheme (The GUI Macro)
 
-* Rule: All UI rendering must go through the GUI macro (UITheme). 
+* Rule: All UI rendering must go through the GUI macro (UITheme).
 * Do not hardcode fonts, colors, or positioning. This ensures orientation-aware layout consistency.
 
 ---
@@ -613,51 +613,51 @@ Do not run raw `clang-format` or probe it with `command -v`; use the wrapper eve
 **Common Crash Causes**:
 
 1. **Out of Memory** (Most common):
-   
+
    ```cpp
    LOG_DBG("MEM", "Free heap: %d bytes", ESP.getFreeHeap());
    ```
-   
+
    - Monitor heap usage throughout activity lifecycle
-   
+
    - Check if large allocations (>10KB) occur before crash
-   
+
    - Verify buffers are freed in `onExit()`
 
 2. **Stack Overflow**:
-   
+
    ```cpp
    LOG_DBG("TASK", "Stack high water: %d", uxTaskGetStackHighWaterMark(taskHandle));
    ```
-   
+
    - Occurs during deep recursion or large local variables
-   
+
    - Increase task stack size in `xTaskCreate()` (2048 → 4096)
-   
+
    - Move large buffers to heap with malloc
 
 3. **Use-After-Free**:
-   
+
    - Activity deleted but task still running
-   
+
    - Always `vTaskDelete()` in `onExit()` BEFORE activity destruction
-   
+
    - Set pointers to `nullptr` after `free()`
 
 4. **Corrupt Cache Files**:
-   
+
    - Delete `.crosspoint/` directory on SD card
-   
+
    - Forces clean re-parse of all EPUBs
-   
+
    - Check file format versions in [docs/file-formats.md](docs/file-formats.md)
 
 5. **Watchdog Timeout**:
-   
+
    - Loop/task blocked for >5 seconds
-   
+
    - Add `vTaskDelay(1)` in tight loops
-   
+
    - Check for blocking I/O operations
 
 **Verification Steps**:
@@ -776,33 +776,33 @@ Tested in all 4 orientations with 5MB+ files.
 **NEVER manually edit these files** - they are regenerated automatically:
 
 1. **HTML Headers** (generated by `scripts/build_html.py`):
-   
+
    - `src/network/html/*.generated.h`
-   
+
    - **Source**: HTML templates in `data/html/` directory
-   
+
    - **Triggered**: During PlatformIO `pre:` build step
-   
+
    - **To modify**: Edit source HTML in `data/html/`, not generated headers
 
 2. **I18n Headers** (generated by `scripts/gen_i18n.py`):
-   
+
    - `lib/I18n/I18nKeys.h`, `lib/I18n/I18nStrings.h`, `lib/I18n/I18nStrings.cpp`
-   
+
    - **Source**: YAML translation files in `lib/I18n/translations/` (one per language)
-   
+
    - **To modify**: Edit source YAML files, then run `python scripts/gen_i18n.py lib/I18n/translations lib/I18n/`
-   
+
    - **Commit**: Source YAML files only. All three generated files (`I18nKeys.h`, `I18nStrings.h`, `I18nStrings.cpp`) are in `.gitignore` and regenerated at build time.
 
 3. **Build Artifacts** (in `.gitignore`):
-   
+
    - `.pio/` - PlatformIO build output
-   
+
    - `build/` - Compiled binaries
-   
+
    - `*.generated.h` - Any auto-generated headers
-   
+
    - `compile_commands.json` - LSP/IDE metadata
 
 ### Modifying Generated Content Workflow
@@ -952,26 +952,26 @@ build_flags =
 **Cache is automatically invalidated when**:
 
 1. **File format version changes** (see `docs/file-formats.md`)
-   
+
    - `book.bin` version number incremented
-   
+
    - `section.bin` version number incremented
 2. **Render settings change**:
-   
+
    - Font family or size (`SETTINGS.fontFamily`, `SETTINGS.fontSize`)
-   
+
    - Line spacing (`SETTINGS.lineSpacing`)
-   
+
    - Paragraph spacing (`SETTINGS.extraParagraphSpacing`)
-   
+
    - Screen margins (`SETTINGS.screenMargin`)
 3. **Viewport dimensions change**:
-   
+
    - Screen orientation change
-   
+
    - Display resolution change
 4. **Book file modified**:
-   
+
    - Moved, renamed, or content changed (new hash)
 
 **Manual Cache Clear** (safe operations):

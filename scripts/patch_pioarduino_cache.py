@@ -19,7 +19,7 @@ platform = env.PioPlatform()
 builder = Path(platform.get_dir()) / "builder" / "frameworks" / "arduino.py"
 source = builder.read_text(encoding="utf-8")
 # The package already stores libraries per chip; only its cache-presence check is global.
-old_check = '''flag_any_custom_sdkconfig = (FRAMEWORK_LIB_DIR is not None and 
+old_check = '''flag_any_custom_sdkconfig = (FRAMEWORK_LIB_DIR is not None and
                             exists(str(Path(FRAMEWORK_LIB_DIR) / "sdkconfig")))'''
 new_check = '''flag_any_custom_sdkconfig = (
     FRAMEWORK_LIB_DIR is not None

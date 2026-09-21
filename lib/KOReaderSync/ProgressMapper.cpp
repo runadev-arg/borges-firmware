@@ -770,7 +770,7 @@ bool streamSpine(const std::shared_ptr<Epub>& epub, int spineIndex, ParagraphStr
 }  // namespace
 
 SavedProgressPosition ProgressMapper::toSavedProgress(const std::shared_ptr<Epub>& epub,
-                                                      const CrossPointPosition& pos) {
+                                                      const BorgesPosition& pos) {
   SavedProgressPosition result;
   float intra =
       (pos.totalPages > 1) ? static_cast<float>(pos.pageNumber) / static_cast<float>(pos.totalPages - 1) : 0.0f;
@@ -790,7 +790,7 @@ SavedProgressPosition ProgressMapper::toSavedProgress(const std::shared_ptr<Epub
   return result;
 }
 
-std::optional<CrossPointPosition> ProgressMapper::fromRichPosition(const std::shared_ptr<Epub>& epub,
+std::optional<BorgesPosition> ProgressMapper::fromRichPosition(const std::shared_ptr<Epub>& epub,
                                                                    const KOReaderRichPosition& rich,
                                                                    GfxRenderer& renderer, bool xpathAlreadyTried) {
   const int spineCount = epub->getSpineItemsCount();
@@ -799,7 +799,7 @@ std::optional<CrossPointPosition> ProgressMapper::fromRichPosition(const std::sh
     return std::nullopt;
   }
 
-  CrossPointPosition result{};
+  BorgesPosition result{};
   result.spineIndex = rich.spineIndex;
 
   // The existing rich extension carries the same KOReader XPath as the standard
@@ -808,7 +808,7 @@ std::optional<CrossPointPosition> ProgressMapper::fromRichPosition(const std::sh
   // XPath -- re-streaming the same chapter for the same failure is pure waste.
   if (!xpathAlreadyTried && !rich.xpath.empty()) {
     SavedProgressPosition saved{rich.xpath, static_cast<float>(rich.pctQ) / 1000000.0f};
-    auto contentMapped = toCrossPoint(epub, saved, renderer);
+    auto contentMapped = toBorges(epub, saved, renderer);
     if (contentMapped.hasVisibleTextOffset) {
       return contentMapped;
     }
@@ -855,10 +855,10 @@ std::optional<CrossPointPosition> ProgressMapper::fromRichPosition(const std::sh
   return result;
 }
 
-CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epub, const SavedProgressPosition& koPos,
+BorgesPosition ProgressMapper::toBorges(const std::shared_ptr<Epub>& epub, const SavedProgressPosition& koPos,
                                                 GfxRenderer& renderer, int currentSpineIndex,
                                                 int totalPagesInCurrentSpine, int fallbackTotalPages) {
-  CrossPointPosition result{};
+  BorgesPosition result{};
   const size_t bookSize = epub->getBookSize();
   if (bookSize == 0) return result;
 

@@ -3,7 +3,7 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
-#include "CrossPointSettings.h"
+#include "BorgesSettings.h"
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"

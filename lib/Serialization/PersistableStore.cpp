@@ -8,7 +8,7 @@
 #include <limits>
 
 bool PersistableStoreBase::writeDocToFile(const char* path, const JsonDocument& doc) {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.borges");
   String json;
   serializeJson(doc, json);
   if (!Storage.writeFile(path, json)) {
